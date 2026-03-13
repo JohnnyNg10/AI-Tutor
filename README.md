@@ -43,7 +43,7 @@
 |------|--------|
 | 后端 | Python, FastAPI, SQLAlchemy async, Celery + Redis |
 | Agent | Python, LangChain, LlamaIndex, RAG |
-| 数据库 | MySQL, Elasticsearch |
+| 数据库 | MySQL, Chroma |
 | 前端 | Vue3, Axios, SSE |
 | 数据处理 | Python, Pandas, NumPy |
 | 知识图谱 | NetworkX, JSON |
@@ -117,13 +117,16 @@ ai_tutor_project/
 │   │
 │   │   ├── db.py                   # 数据库连接
 │   │   └── init_db.py              # 初始化数据库
+│   
+│
+│   ├── utils/                      # 工具函数
+│   │
+│   │    ├── data_loader.py         # 题库加载
+│   │    ├── logger.py              # 日志
+│   │    └── config.py              # 配置文件
 │
 │
-│   └── utils/                      # 工具函数
-│
-│        ├── data_loader.py         # 题库加载
-│        ├── logger.py              # 日志
-│        └── config.py              # 配置文件
+│   └── requirements.txt
 │
 │
 ├── frontend/                       # 前端
