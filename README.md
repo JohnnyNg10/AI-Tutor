@@ -27,7 +27,6 @@
 
 ## 系统架构
 
-![AI Tutor 系统架构](docs/ai_tutor_architecture.png)  
 
 **说明：**
 - Instructor Agent：题目分析、分步骤讲解
@@ -56,39 +55,120 @@
 ```text
 ai_tutor_project/
 │
-├── backend/                     # 后端核心逻辑
-│   ├── main.py                  # FastAPI启动入口
-│   ├── api/                     # API接口
-│   │    ├── chat.py             # Instructor/Advisor对话接口
-│   │    ├── profile.py          # 学生画像接口
-│   │    └── exercises.py        # 推送练习题接口
-│   ├── agent/                   # 双Agent逻辑
-│   │    ├── instructor.py
-│   │    └── advisor.py
-│   ├── rag/                     # RAG知识库检索
-│   │    ├── vector_db.py
-│   │    └── retriever.py
-│   ├── kg/                      # 数学知识图谱构建
-│   │    └── kg_builder.py
-│   ├── models/                  # 数据库模型
-│   │    ├── user.py
-│   │    ├── question.py
-│   │    └── record.py
-│   └── utils/                   # 工具函数
-│        └── data_loader.py
+├── backend/                        # 后端核心逻辑
 │
-├── frontend/                     # Web界面
+│   ├── main.py                     # FastAPI启动入口
+│
+│   ├── api/                        # API接口层
+│   │
+│   │   ├── chat.py                 # Tutor对话接口
+│   │   ├── profile.py              # 学生画像接口
+│   │   ├── exercises.py            # 练习题推荐接口
+│   │   │
+│   │   ├── auth.py                 # 登录注册接口（新增）
+│   │   └── upload.py               # 图片/文件上传接口（新增）
+│
+│
+│   ├── agent/                      # 多Agent系统
+│   │
+│   │   ├── instructor.py           # 解题Agent
+│   │   ├── advisor.py              # 学习规划Agent
+│   │   └── planner.py              # Agent调度器（可选增强）
+│
+│
+│   ├── multimodal/                 # 多模态输入处理模块
+│   │
+│   │   ├── image_parser.py         # 图片题目解析
+│   │   ├── file_parser.py          # PDF/文档解析
+│   │   └── question_formatter.py   # 统一转换为标准题目格式
+│
+│
+│   ├── rag/                        # RAG模块
+│   │
+│   │   ├── vector_db.py            # 向量数据库
+│   │   ├── retriever.py            # 检索逻辑
+│   │   └── embedding.py            # 文本向量化
+│
+│
+│   ├── kg/                         # 知识图谱模块
+│   │
+│   │   ├── kg_builder.py           # KG构建
+│   │   └── kg_query.py             # KG查询接口
+│
+│
+│   ├── models/                     # 数据库模型
+│   │
+│   │   ├── user.py                 # 用户表
+│   │   ├── question.py             # 题目表
+│   │   ├── record.py               # 学习记录
+│   │   ├── profile.py              # 学生画像（新增）
+│   │   └── exercise_history.py     # 练习历史（新增）
+│
+│
+│   ├── services/                   # 业务逻辑层
+│   │
+│   │   ├── auth_service.py         # 登录注册逻辑
+│   │   ├── tutor_service.py        # Tutor调用逻辑
+│   │   ├── recommendation_service.py # 推荐系统
+│   │   └── profile_service.py      # 学生画像更新
+│
+│
+│   ├── database/                   # 数据库配置（新增）
+│   │
+│   │   ├── db.py                   # 数据库连接
+│   │   └── init_db.py              # 初始化数据库
+│
+│
+│   └── utils/                      # 工具函数
+│
+│        ├── data_loader.py         # 题库加载
+│        ├── logger.py              # 日志
+│        └── config.py              # 配置文件
+│
+│
+├── frontend/                       # 前端
+│
 │   ├── pages/
+│   │
+│   │   ├── login.vue               # 登录页
+│   │   ├── register.vue            # 注册页
+│   │   ├── chat.vue                # Tutor页面
+│   │   └── profile.vue             # 学习画像
+│
 │   ├── components/
+│   │
+│   │   ├── QuestionInput.vue       # 题目输入组件
+│   │   ├── ImageUploader.vue       # 图片上传组件（新增）
+│   │   └── AnswerDisplay.vue       # 解题步骤展示
+│
 │   └── services/
 │
-├── dataset/                      # 数列题库JSON
-│   └── sequence_problems.json
+│        ├── api.js                 # API封装
+│        └── auth.js                # 登录认证
 │
-├── prompts/                      # Prompt模板
+│
+├── dataset/                        # 原始数据
+│
+│   └── sequence_problems.json      # 数列题库
+│
+│
+├── prompts/                        # Prompt模板
+│
 │   ├── instructor_prompt.txt
 │   └── advisor_prompt.txt
 │
-└── docs/
-     ├── ai_tutor_architecture.png   # 系统架构图
-     └── plan.md                     # 项目计划文档
+│
+├── storage/                        # 用户上传文件存储
+│
+│   ├── images/
+│   └── documents/
+│
+│
+├── docs/                           # 项目文档
+│
+│   ├── architecture.md
+│   ├── ai_tutor_architecture.png
+│   └── plan.md
+│
+│
+└── requirements.txt
