@@ -1,2 +1,2 @@
-# Redis核心数据结构依赖
-redis>=4.0.0
+# Redis Dependencies
+redis>=5.0.0

@@ -1,14 +1,15 @@
-# AI Tutor 依赖列表（兼容 Python 3.10-3.12）
-# 安装命令: pip install -r requirements.txt
+# AI Tutor Dependencies (Python 3.10-3.12)
+# Install: pip install -r requirements.txt
 
-# Web 框架
+# Web Framework
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 
-# 数据库
+# Database
 sqlalchemy[asyncio]>=2.0.0
 aiomysql>=0.2.0
+aiosqlite>=0.19.0
 redis>=5.0.0
 
 # AI/LLM
@@ -16,10 +17,10 @@ langchain>=0.1.0
 langchain-openai>=0.0.5
 openai>=1.0.0
 
-# 向量数据库
+# Vector Database
 chromadb>=0.4.0
 
-# 工具库
+# Utils
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
@@ -27,11 +28,13 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 bcrypt>=4.0.0
 
-# 异步
+# Async
 aiofiles>=23.0.0
 aiohttp>=3.9.0
 
-# 其他
+# Others
 numpy>=1.24.0,<2.0.0
+scipy>=1.10.0
 networkx>=3.0.0
 beautifulsoup4>=4.12.0
+requests>=2.31.0
