@@ -81,6 +81,37 @@ class ColorMappingResponse(BaseModel):
     status_texts: Dict[str, str]
 
 
+class RingComponentResponse(BaseModel):
+    """圆环组件响应"""
+    success: bool
+    user_id: int
+    percentage: int  # 0-100
+    color: str  # 十六进制颜色
+    stroke_color: str  # 圆环描边颜色
+    fill_color: str  # 圆环填充颜色
+    status_text: str
+    animation_duration: int  # 动画时长(ms)
+
+
+class WaterDropComponentResponse(BaseModel):
+    """水滴组件响应"""
+    success: bool
+    user_id: int
+    water_level: int  # 0-100 水位高度
+    wave_height: int  # 波浪高度
+    color: str  # 水体颜色
+    bg_color: str  # 背景颜色
+    status_text: str
+    animation_enabled: bool
+
+
+class ComponentConfigResponse(BaseModel):
+    """组件配置响应"""
+    success: bool
+    component_type: str  # ring / water_drop
+    config: Dict[str, Any]
+
+
 # ============ API端点 ============
 
 @router.get("/visualization", response_model=MasteryVisualizationResponse)
@@ -232,6 +263,146 @@ async def get_color_mapping():
         colors=service.COLOR_MAP,
         status_texts=service.STATUS_TEXT_MAP
     )
+
+
+@router.get("/component/ring", response_model=RingComponentResponse)
+async def get_ring_component(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    获取圆环组件数据
+    
+    对应行号2: 弃用传统进度条，采用圆环组件展示掌握度
+    
+    颜色联动硬指标：
+    - P(L) < 0.5: 红色（危险区）#FF4D4F
+    - 0.5 <= P(L) < 0.8: 黄色（过渡区）#FAAD14
+    - P(L) >= 0.8: 绿色（掌握区）#52C41A
+    """
+    try:
+        user_id = current_user.get('id', 0)
+        
+        service = MasteryVisualizationService()
+        mastery_data = service.get_user_mastery_from_redis(user_id)
+        
+        # 计算全局掌握度
+        global_mastery = sum(mastery_data.values()) / len(mastery_data) if mastery_data else 0.0
+        percentage = service.p_known_to_percentage(global_mastery)
+        color = service.p_known_to_color(global_mastery)
+        status_text = service.get_status_text(global_mastery)
+        
+        return RingComponentResponse(
+            success=True,
+            user_id=user_id,
+            percentage=percentage,
+            color=color,
+            stroke_color=color,
+            fill_color=color + "20",  # 添加透明度
+            status_text=status_text,
+            animation_duration=1000  # 1秒动画
+        )
+        
+    except Exception as e:
+        logger.error(f"获取圆环组件数据失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/component/water-drop", response_model=WaterDropComponentResponse)
+async def get_water_drop_component(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    获取水滴组件数据
+    
+    对应行号2: 弃用传统进度条，采用水滴组件展示掌握度
+    
+    水位动效：
+    - 水位高度 = P(L) * 100
+    - 波浪高度根据掌握度动态调整
+    """
+    try:
+        user_id = current_user.get('id', 0)
+        
+        service = MasteryVisualizationService()
+        mastery_data = service.get_user_mastery_from_redis(user_id)
+        
+        # 计算全局掌握度
+        global_mastery = sum(mastery_data.values()) / len(mastery_data) if mastery_data else 0.0
+        water_level = service.calculate_water_level(global_mastery)
+        color = service.p_known_to_color(global_mastery)
+        status_text = service.get_status_text(global_mastery)
+        
+        # 波浪高度：掌握度越高，波浪越平缓
+        wave_height = max(5, 20 - int(global_mastery * 15))
+        
+        return WaterDropComponentResponse(
+            success=True,
+            user_id=user_id,
+            water_level=water_level,
+            wave_height=wave_height,
+            color=color,
+            bg_color="#F0F0F0",
+            status_text=status_text,
+            animation_enabled=True
+        )
+        
+    except Exception as e:
+        logger.error(f"获取水滴组件数据失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/component/config")
+async def get_component_config(
+    component_type: str = Query("ring", description="组件类型: ring / water_drop"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    获取组件配置
+    
+    返回前端可视化组件的完整配置参数
+    """
+    try:
+        user_id = current_user.get('id', 0)
+        
+        service = MasteryVisualizationService()
+        mastery_data = service.get_user_mastery_from_redis(user_id)
+        global_mastery = sum(mastery_data.values()) / len(mastery_data) if mastery_data else 0.0
+        
+        if component_type == "ring":
+            config = {
+                "type": "ring",
+                "percentage": service.p_known_to_percentage(global_mastery),
+                "color": service.p_known_to_color(global_mastery),
+                "stroke_width": 10,
+                "radius": 60,
+                "animation_duration": 1000,
+                "show_text": True,
+                "text_format": "{percentage}%"
+            }
+        elif component_type == "water_drop":
+            config = {
+                "type": "water_drop",
+                "water_level": service.calculate_water_level(global_mastery),
+                "color": service.p_known_to_color(global_mastery),
+                "wave_amplitude": max(5, 20 - int(global_mastery * 15)),
+                "wave_frequency": 0.02,
+                "animation_speed": 2000,
+                "show_bubbles": global_mastery > 0.5
+            }
+        else:
+            raise HTTPException(status_code=400, detail="不支持的组件类型")
+        
+        return ComponentConfigResponse(
+            success=True,
+            component_type=component_type,
+            config=config
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取组件配置失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/summary")
