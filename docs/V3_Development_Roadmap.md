@@ -2,7 +2,7 @@
 
 **文档版本**: v1.0  
 **创建日期**: 2026-04-16  
-**最后更新**: 2026-04-16  
+**最后更新**: 2026-04-17  
 **维护者**: AI Assistant
 
 ---
@@ -18,6 +18,7 @@
 | 需求10 | 游戏技能树 | ✅ 已完成 | 2026-04-15 | `algorithms/skill_tree.py` |
 | 需求16 | 渐进式提示按钮 | ✅ 已完成 | 2026-04-16 | `algorithms/hint_button_state_machine.py` |
 | 需求20 | 每日5题特训包 | ✅ 已完成 | 2026-04-16 | `algorithms/daily_training_pack.py` |
+| 需求24 | RAG候选池构建 | ✅ 已完成 | 2026-04-17 | `algorithms/rag_candidate_pool.py` |
 | 需求29 | 记忆衰减Cron任务 | ✅ 已完成 | 2026-04-16 | `algorithms/memory_decay_cron.py` |
 
 ---
@@ -166,24 +167,26 @@ if consecutive_wrong >= 3:
 
 ---
 
-### 🔥 第三阶段：RAG候选池构建（推荐质量）
+### 🔥 第三阶段：RAG候选池构建（推荐质量）✅ 已完成
 
 **优先级**: P1  
 **预估工期**: 4-5天  
+**实际工期**: 1天  
+**完成日期**: 2026-04-17  
 **前置依赖**: Advisor Agent、Redis数据结构  
 **阻塞后续**: 每日5题完善、技能树推荐
 
-**为什么优先**:
-1. **推荐质量**: 需求20的"攻坚题"需要Chroma向量库支持
-2. **核心算法**: RAG是AI Tutor的核心竞争力
-3. **数据驱动**: 依赖向量数据库，需要提前准备
+**实现状态**: ✅ 已完成，详见 `docs/V3_RAG_Candidate_Pool_IMPLEMENTATION.md`
 
-**待实现功能**:
-| 步骤 | 功能 | 说明 |
-|-----|------|------|
-| 1 | RAG初筛 | 基于薄弱知识点向量检索 |
-| 2 | 元数据过滤 | 难度匹配、去重、知识点关联 |
-| 3 | 相似度加权 | 上下文相似度 + 知识点相关度 + 难度匹配 |
+**已实现功能**:
+| 步骤 | 功能 | 状态 | 文件 |
+|-----|------|------|------|
+| 1 | RAG初筛 | ✅ | `rag_candidate_pool.py` |
+| 2 | 元数据过滤 | ✅ | `rag_candidate_pool.py` |
+| 3 | 相似度加权 | ✅ | `rag_candidate_pool.py` |
+| 4 | 复习队列调度 | ✅ | `question_recommendation.py` |
+| 5 | 新题/复习策略 | ✅ | `question_recommendation.py` |
+| 6 | 推荐理由生成 | ✅ | `question_recommendation.py` |
 
 **算法流程**:
 ```python
@@ -204,30 +207,11 @@ context_similarity = cosine_similarity(recent_context, question_content)
 final_score = 0.6 * kp_relevance + 0.3 * difficulty_match + 0.1 * context_similarity
 ```
 
-**验收标准**:
-```python
-# 测试用例1：向量检索
-weak_kps = ["等比数列"]
-candidates = vector_search(weak_kps, top_k=50)
-assert len(candidates) <= 50
-assert all(c["knowledge_point"] in weak_kps for c in candidates)
-
-# 测试用例2：难度过滤
-theta = 0.5
-filtered = [c for c in candidates if abs(c["difficulty"] - theta) <= 1.0]
-assert len(filtered) > 0
-assert all(abs(c["difficulty"] - theta) <= 1.0 for c in filtered)
-
-# 测试用例3：相似度排序
-scored = [(c, calculate_final_score(c, context)) for c in candidates]
-scored.sort(key=lambda x: x[1], reverse=True)
-assert scored[0][1] >= scored[-1][1]  # 降序排列
-```
-
-**实现文件规划**:
-- `backend/services/chroma_service.py` - Chroma向量数据库服务
-- `backend/algorithms/rag_candidate_pool.py` - RAG候选池构建
-- `backend/algorithms/question_recommendation.py` - 题目推荐算法
+**实现文件**:
+- ✅ `backend/services/chroma_service.py` - Chroma向量数据库服务
+- ✅ `backend/algorithms/rag_candidate_pool.py` - RAG候选池构建
+- ✅ `backend/algorithms/question_recommendation.py` - 题目推荐算法
+- ✅ `backend/api/recommendation_v3.py` - V3推荐API
 
 ---
 
