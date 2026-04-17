@@ -1,0 +1,287 @@
+"""
+掌握度可视化API接口
+提供掌握度可视化组件所需的数据接口
+
+对应需求1: 将BKT算法生成的掌握度P(L)转化为直观的色彩和水位动效
+
+实现文件：backend/api/mastery_visualization.py
+"""
+
+import sys
+import os
+
+# 添加backend目录到路径
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DIR = os.path.dirname(CURRENT_DIR)
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
+
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Depends, Query
+
+from services.mastery_visualization_service import (
+    MasteryVisualizationService,
+    get_user_mastery_visualization
+)
+from utils.logger import logger
+from utils.auth import get_current_user
+
+router = APIRouter(prefix="/mastery", tags=["掌握度可视化"])
+
+
+# ============ 数据模型 ============
+
+class MasteryLevelResponse(BaseModel):
+    """掌握度等级响应"""
+    kp_id: str
+    kp_name: str
+    p_known: float
+    level: str
+    color: str
+    percentage: int
+
+
+class TopicProgressResponse(BaseModel):
+    """专题进度响应"""
+    topic: str
+    progress: float
+    progress_text: str
+    status: str
+    mastered: int
+    total: int
+
+
+class MasteryVisualizationResponse(BaseModel):
+    """掌握度可视化完整响应"""
+    success: bool
+    user_id: int
+    global_mastery: float
+    water_level: int
+    ring_color: str
+    status_text: str
+    statistics: Dict[str, int]
+    mastery_levels: List[MasteryLevelResponse]
+    topic_progress: List[TopicProgressResponse]
+
+
+class AbilityCurveResponse(BaseModel):
+    """能力曲线响应"""
+    success: bool
+    user_id: int
+    days: int
+    data: List[Dict[str, Any]]
+
+
+class ColorMappingResponse(BaseModel):
+    """颜色映射响应"""
+    success: bool
+    thresholds: Dict[str, float]
+    colors: Dict[str, str]
+    status_texts: Dict[str, str]
+
+
+# ============ API端点 ============
+
+@router.get("/visualization", response_model=MasteryVisualizationResponse)
+async def get_mastery_visualization(
+    topics: Optional[List[str]] = Query(None, description="专题列表"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    获取掌握度可视化数据
+    
+    将BKT算法生成的掌握度P(L)转化为前端可视化组件所需的数据格式：
+    - 水位高度（0-100）
+    - 圆环颜色（红/黄/绿）
+    - 掌握度等级（weak/learning/mastered）
+    - 专题进度
+    """
+    try:
+        user_id = current_user.get('id', 0)
+        logger.info(f"获取掌握度可视化数据: 用户={user_id}")
+        
+        viz_data = get_user_mastery_visualization(user_id, topics)
+        
+        return MasteryVisualizationResponse(
+            success=True,
+            **viz_data
+        )
+        
+    except Exception as e:
+        logger.error(f"获取掌握度可视化数据失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/level/{knowledge_point_id}")
+async def get_knowledge_point_mastery(
+    knowledge_point_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    获取单个知识点的掌握度详情
+    """
+    try:
+        user_id = current_user.get('id', 0)
+        
+        service = MasteryVisualizationService()
+        mastery_data = service.get_user_mastery_from_redis(user_id)
+        
+        p_known = mastery_data.get(knowledge_point_id, 0.0)
+        
+        return {
+            'success': True,
+            'user_id': user_id,
+            'knowledge_point_id': knowledge_point_id,
+            'p_known': p_known,
+            'level': service.p_known_to_level(p_known),
+            'color': service.p_known_to_color(p_known),
+            'percentage': service.p_known_to_percentage(p_known),
+            'status_text': service.get_status_text(p_known)
+        }
+        
+    except Exception as e:
+        logger.error(f"获取知识点掌握度失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/topic-progress/{topic}")
+async def get_topic_progress(
+    topic: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    获取专题进度
+    
+    计算公式：进度百分比 = (P(L) >= 0.8的知识点数量) / (该专题总知识点数量)
+    """
+    try:
+        user_id = current_user.get('id', 0)
+        logger.info(f"获取专题进度: 用户={user_id}, 专题={topic}")
+        
+        service = MasteryVisualizationService()
+        mastery_data = service.get_user_mastery_from_redis(user_id)
+        
+        progress = service.calculate_topic_progress(user_id, topic, mastery_data)
+        
+        return {
+            'success': True,
+            'user_id': user_id,
+            'topic': progress.topic,
+            'progress_percentage': progress.progress_percentage,
+            'progress_text': progress.progress_text,
+            'status': progress.status,
+            'statistics': {
+                'total_nodes': progress.total_nodes,
+                'mastered_nodes': progress.mastered_nodes,
+                'learning_nodes': progress.learning_nodes,
+                'weak_nodes': progress.weak_nodes,
+                'locked_nodes': progress.locked_nodes
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"获取专题进度失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ability-curve", response_model=AbilityCurveResponse)
+async def get_ability_curve(
+    days: int = Query(30, ge=7, le=90, description="天数范围"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    获取能力曲线数据
+    
+    用于绘制IRT θ值变化趋势图
+    """
+    try:
+        user_id = current_user.get('id', 0)
+        logger.info(f"获取能力曲线: 用户={user_id}, 天数={days}")
+        
+        service = MasteryVisualizationService()
+        curve_data = service.get_ability_curve_data(user_id, days)
+        
+        return AbilityCurveResponse(
+            success=True,
+            user_id=user_id,
+            days=days,
+            data=curve_data
+        )
+        
+    except Exception as e:
+        logger.error(f"获取能力曲线失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/color-mapping", response_model=ColorMappingResponse)
+async def get_color_mapping():
+    """
+    获取颜色映射配置
+    
+    返回掌握度到颜色的映射规则，供前端使用
+    """
+    service = MasteryVisualizationService()
+    
+    return ColorMappingResponse(
+        success=True,
+        thresholds={
+            'weak': service.MASTERY_THRESHOLD_WEAK,
+            'learning': service.MASTERY_THRESHOLD_LEARNING
+        },
+        colors=service.COLOR_MAP,
+        status_texts=service.STATUS_TEXT_MAP
+    )
+
+
+@router.get("/summary")
+async def get_mastery_summary(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    获取掌握度摘要（用于首页展示）
+    """
+    try:
+        user_id = current_user.get('id', 0)
+        
+        viz_data = get_user_mastery_visualization(user_id)
+        
+        return {
+            'success': True,
+            'user_id': user_id,
+            'global_mastery': viz_data['global_mastery'],
+            'water_level': viz_data['water_level'],
+            'ring_color': viz_data['ring_color'],
+            'status_text': viz_data['status_text'],
+            'quick_stats': {
+                'total': viz_data['statistics']['total'],
+                'mastered': viz_data['statistics']['mastered'],
+                'mastered_percentage': round(
+                    viz_data['statistics']['mastered'] / viz_data['statistics']['total'] * 100, 1
+                ) if viz_data['statistics']['total'] > 0 else 0
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"获取掌握度摘要失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ 健康检查 ============
+
+@router.get("/health")
+async def health_check():
+    """服务健康检查"""
+    try:
+        service = MasteryVisualizationService()
+        return {
+            'status': 'healthy',
+            'service': 'mastery_visualization',
+            'color_map': service.COLOR_MAP
+        }
+    except Exception as e:
+        logger.error(f"健康检查失败: {e}")
+        return {
+            'status': 'unhealthy',
+            'error': str(e)
+        }
