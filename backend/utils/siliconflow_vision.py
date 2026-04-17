@@ -12,9 +12,10 @@ class SiliconFlowVisionClient:
     """硅基流动视觉模型客户端（OpenAI 兼容格式）"""
     
     def __init__(self):
-        self.api_key = settings.openai_api_key
-        self.base_url = settings.openai_api_base
-        self.vision_model = settings.vision_model or "Qwen/Qwen2-VL-72B-Instruct"
+        # Use dedicated SiliconFlow API key if available, fallback to OpenAI key
+        self.api_key = settings.siliconflow_api_key or settings.openai_api_key
+        self.base_url = settings.siliconflow_api_base or settings.openai_api_base
+        self.vision_model = settings.vision_model or "Qwen/Qwen2.5-VL-32B-Instruct"
         
         if not self.api_key:
             logger.warning("SiliconFlow API key not configured")

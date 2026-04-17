@@ -73,9 +73,11 @@ class Settings(BaseSettings):
     llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
 
 
-    # 硅基流动视觉模型
+    # 硅基流动配置
     vision_model: str = os.getenv("VISION_MODEL", "")
-    embedding_model: str = os.getenv("EMBEDDING_MODEL", "")
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B")
+    siliconflow_api_key: str = os.getenv("SILICONFLOW_API_KEY", "")
+    siliconflow_api_base: str = os.getenv("SILICONFLOW_API_BASE", "https://api.siliconflow.cn/v1")
 
     # 超算互联网配置（比赛限定模型 - Qwen3-Embedding-8B）
     chaosuan_api_key: str = os.getenv("CHAOSUAN_API_KEY", "")

@@ -66,10 +66,13 @@ class SiliconFlowEmbeddingFunction:
     """硅基流动 Embedding 适配器"""
 
     def __init__(self, model: Optional[str] = None) -> None:
-        self.model = model or settings.embedding_model or "BAAI/bge-large-zh-v1.5"
+        self.model = model or settings.embedding_model or "Qwen/Qwen3-Embedding-8B"
+        # Use dedicated SiliconFlow API key if available, fallback to OpenAI key
+        api_key = settings.siliconflow_api_key or settings.openai_api_key
+        base_url = settings.siliconflow_api_base or settings.openai_api_base
         self.client = OpenAI(
-            api_key=settings.openai_api_key,
-            base_url=settings.openai_api_base
+            api_key=api_key,
+            base_url=base_url
         )
 
     def __call__(self, input: Sequence[str]) -> List[List[float]]:
