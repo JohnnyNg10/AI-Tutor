@@ -20,6 +20,9 @@ class DashScopeEmbeddingFunction:
         self.api_key = settings.dashscope_api_key
         self.api_base = settings.dashscope_api_base or "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
 
+    def name(self) -> str:
+        return "dashscope_embedding"
+
     def __call__(self, input: Sequence[str]) -> List[List[float]]:
         """ChromaDB 会以字符串列表形式调用该函数。"""
         import requests
@@ -75,6 +78,9 @@ class SiliconFlowEmbeddingFunction:
             base_url=base_url
         )
 
+    def name(self) -> str:
+        return "siliconflow_embedding"
+
     def __call__(self, input: Sequence[str]) -> List[List[float]]:
         """ChromaDB 会以字符串列表形式调用该函数。"""
         clean_texts = [str(t).strip() for t in input if str(t).strip()]
@@ -103,6 +109,9 @@ class ChaoSuanEmbeddingFunction:
             api_key=settings.chaosuan_api_key,
             base_url=settings.chaosuan_api_base
         )
+
+    def name(self) -> str:
+        return "chaosuan_embedding"
 
     def __call__(self, input: Sequence[str]) -> List[List[float]]:
         """ChromaDB 会以字符串列表形式调用该函数。"""
@@ -293,10 +302,27 @@ class VolcEmbeddingFunction:
 
 
 
+# 单例
+_retriever_instance: Optional["KnowledgeRetriever"] = None
+
+
+def get_retriever() -> "KnowledgeRetriever":
+    """获取 KnowledgeRetriever 单例"""
+    global _retriever_instance
+    if _retriever_instance is None:
+        _retriever_instance = KnowledgeRetriever()
+    return _retriever_instance
+
+
 class KnowledgeRetriever:
-    """知识点/例题检索器 - 基于 ChromaDB 向量数据库"""
+    """知识点/例题检索器 - 基于 ChromaDB 向量数据库 (单例模式)"""
 
     def __init__(self):
+        global _retriever_instance
+        if _retriever_instance is not None:
+            self.__dict__ = _retriever_instance.__dict__
+            return
+
         self.client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
         # 优先使用 DashScope（通义千问官方），其次硅基流动，然后超算互联网，最后火山引擎
         if settings.dashscope_api_key and settings.dashscope_embedding_model:
@@ -312,12 +338,54 @@ class KnowledgeRetriever:
             logger.info(f"使用火山引擎Embedding模型: {settings.volc_embedding_model}")
             self.embedding_function = VolcEmbeddingFunction()
 
-        self.knowledge_collection = self.client.get_or_create_collection(
-            name="knowledge_points",
-        )
-        self.examples_collection = self.client.get_or_create_collection(
-            name="example_questions",
-        )
+        self.knowledge_collection = self._get_or_create_collection("knowledge_points")
+        self.examples_collection = self._get_or_create_collection("example_questions")
+
+        # 维度校验
+        try:
+            self._validate_dimension()
+        except Exception as e:
+            logger.error(f"Embedding 维度校验失败，检索可能不可用: {e}")
+
+        _retriever_instance = self
+
+    def _validate_dimension(self):
+        """验证 embedding 模型输出维度与 ChromaDB collection 一致"""
+        test_vector = self.embedding_function(["test"])[0]
+        emb_dim = len(test_vector)
+        existing = self.examples_collection.get(limit=1, include=["embeddings"])
+        emb_list = existing.get("embeddings") if existing else None
+        if emb_list is not None and len(emb_list) > 0:
+            first_emb = emb_list[0]
+            if first_emb is not None and len(first_emb) > 0:
+                db_dim = len(first_emb)
+                if emb_dim != db_dim:
+                    raise ValueError(
+                        f"Embedding 维度不匹配：模型={emb_dim}, 数据库={db_dim}。"
+                        f"请删除 chroma_db 目录重新导入数据"
+                    )
+        logger.info(f"Embedding 维度校验通过: {emb_dim}")
+
+    def _get_or_create_collection(self, name: str):
+        """获取或创建 collection，处理 embedding function 冲突"""
+        try:
+            # 先尝试获取已存在的 collection
+            collection = self.client.get_collection(name=name)
+            logger.info(f"使用已存在的 collection: {name}")
+            return collection
+        except Exception:
+            # 如果不存在，创建新的
+            try:
+                collection = self.client.create_collection(
+                    name=name,
+                    embedding_function=self.embedding_function
+                )
+                logger.info(f"创建新的 collection: {name}")
+                return collection
+            except Exception as e:
+                logger.warning(f"创建 collection 失败，尝试获取: {e}")
+                # 如果创建失败（比如已存在但获取也失败），再次尝试获取
+                return self.client.get_collection(name=name)
 
 
     @staticmethod
@@ -345,43 +413,49 @@ class KnowledgeRetriever:
         return output
 
     def search_knowledge(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+        if not isinstance(query, str) or not query.strip():
+            logger.warning("搜索知识点的查询文本为空或非法")
+            return []
+        query_text = query.strip()
         try:
-            if not isinstance(query, str) or not query.strip():
-                logger.warning("搜索知识点的查询文本为空或非法")
-                return []
-
-            query_text = query.strip()
             query_vector = self.embedding_function([query_text])[0]
             results = self.knowledge_collection.query(
-                query_embeddings=[query_vector],
-                n_results=max(1, int(top_k)),
+                query_embeddings=[query_vector], n_results=max(1, int(top_k)),
             )
-
             data = self._format_query_results(results)
             logger.info(f"知识点检索完成：找到 {len(data)} 条结果")
             return data
+        except ValueError as e:
+            logger.error(f"[检索] 维度不匹配: {e}。可能需要重建 ChromaDB")
+            return []
+        except ConnectionError as e:
+            logger.error(f"[检索] 网络错误: {e}")
+            return []
         except Exception as e:
-            logger.error(f"知识点检索失败: {e}", exc_info=True)
+            logger.error(f"[检索] 知识点检索失败: {e}", exc_info=True)
             return []
 
     def search_examples(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+        if not isinstance(query, str) or not query.strip():
+            logger.warning("搜索例题的查询文本为空或非法")
+            return []
+        query_text = query.strip()
         try:
-            if not isinstance(query, str) or not query.strip():
-                logger.warning("搜索例题的查询文本为空或非法")
-                return []
-
-            query_text = query.strip()
             query_vector = self.embedding_function([query_text])[0]
             results = self.examples_collection.query(
-                query_embeddings=[query_vector],
-                n_results=max(1, int(top_k)),
+                query_embeddings=[query_vector], n_results=max(1, int(top_k)),
             )
-
             data = self._format_query_results(results)
             logger.info(f"例题检索完成：找到 {len(data)} 条结果")
             return data
+        except ValueError as e:
+            logger.error(f"[检索] 维度不匹配: {e}。可能需要重建 ChromaDB")
+            return []
+        except ConnectionError as e:
+            logger.error(f"[检索] 网络错误: {e}")
+            return []
         except Exception as e:
-            logger.error(f"例题检索失败: {e}", exc_info=True)
+            logger.error(f"[检索] 例题检索失败: {e}", exc_info=True)
             return []
 
     def batch_insert(
