@@ -72,106 +72,120 @@ async def get_knowledge_tree_progress(
     db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """获取知识树进度（真实DB查询）"""
+    """获取知识树进度（基于知识图谱 + DB 掌握度数据）"""
     try:
         user_id = current_user.id
+        from algorithms.knowledge_graph import (
+            SEQUENCE_KNOWLEDGE_GRAPH, get_categories, get_topics_by_category,
+            KGGraphNode, KGNodeType
+        )
 
-        builder = get_skill_tree_builder()
         db_mastery = await get_user_mastery_dict(db, user_id)
-        topic_names = [topic] if topic else builder.get_all_topics()
 
-        topics = []
-        for topic_name in topic_names:
-            tree = builder.get_skill_tree(topic_name)
-            if not tree:
-                continue
-            mastery = {}
-            for node_id, node in tree.nodes.items():
-                if node.name in db_mastery:
-                    mastery[node_id] = db_mastery[node.name]
-                else:
-                    mastery[node_id] = 0.5
-            prog = builder.calculate_topic_progress(topic_name, mastery)
+        def _tag_mastery(tags):
+            """计算一组标签的掌握度：匹配到的取均值，未匹配的默认 0.5"""
+            scores = []
+            for tag in tags:
+                if tag in db_mastery:
+                    scores.append(db_mastery[tag])
+            if not scores:
+                return { "avg": 0.5, "matched": 0, "total": len(tags), "scores": [] }
+            return { "avg": sum(scores) / len(scores), "matched": len(scores),
+                     "total": len(tags), "scores": scores }
 
-            # 构建节点详情列表
-            nodes = []
-            all_node_names = list(tree.nodes.keys())
-            for node_id in all_node_names:
-                node = tree.nodes[node_id]
-                p = mastery.get(node_id, 0.5)
-                if p >= 0.8:
-                    nstatus = "mastered"
-                elif p >= 0.5:
-                    nstatus = "learning"
-                elif p >= 0.3:
-                    nstatus = "weak"
-                else:
-                    nstatus = "locked"
-                # 查找前置节点名称
-                prereq_names = []
-                for pid in node.prerequisites:
-                    if pid in tree.nodes:
-                        prereq_names.append(tree.nodes[pid].name)
-                    elif pid in builder.skill_trees:
-                        pass  # 跨专题依赖，简化处理
-                    else:
-                        for other_tree in builder.skill_trees.values():
-                            if pid in other_tree.nodes:
-                                prereq_names.append(other_tree.nodes[pid].name)
-                                break
-                nodes.append({
-                    "node_id": node.node_id,
-                    "name": node.name,
-                    "p_known": round(p, 2),
-                    "status": nstatus,
-                    "level": node.position.get("level", 0) if node.position else 0,
-                    "prerequisites": node.prerequisites,
-                    "prerequisite_names": prereq_names,
-                })
+        def _status(p):
+            if p >= 0.8: return "mastered"
+            if p >= 0.5: return "learning"
+            if p >= 0.3: return "weak"
+            return "locked"
 
-            topics.append({
-                "topic": topic_name,
-                "progress": round(prog.progress_percentage, 1),
-                "progress_text": f"{prog.progress_percentage:.0f}%",
-                "status": "mastered" if prog.progress_percentage >= 80 else "in_progress" if prog.progress_percentage >= 30 else "locked",
-                "statistics": {"total_nodes": prog.total_nodes, "mastered_nodes": prog.mastered_nodes, "learning_nodes": prog.learning_nodes, "weak_nodes": prog.weak_nodes, "locked_nodes": prog.locked_nodes},
-                "nodes": nodes,
-            })
-
-        if not topics:
-            return KnowledgeTreeResponse(
-                success=True,
-                user_id=user_id,
-                overall_progress=0,
-                statistics={"total_topics": 0, "total_nodes": 0, "mastered_nodes": 0},
-                topics=[]
-            )
-
-        for t in topics:
-            stats = t["statistics"]
-            unlocked = stats.get("mastered_nodes", 0) + stats.get("learning_nodes", 0) + stats.get("weak_nodes", 0)
-            stats["unlocked_nodes"] = unlocked
-            stats["questions_attempted"] = stats.get("mastered_nodes", 0) * 3
-
-            p = t["progress"]
-            t["milestones"] = [
-                {"key": "first_blood", "name": "首次突破", "description": "专题进度达到 10%", "icon": "🌱", "threshold": 10, "achieved": p >= 10},
-                {"key": "half_way",   "name": "半程里程碑", "description": "专题进度达到 50%", "icon": "🛤️", "threshold": 50, "achieved": p >= 50},
-                {"key": "explorer",   "name": "探索者", "description": "专题进度达到 60%", "icon": "🧭", "threshold": 60, "achieved": p >= 60},
-                {"key": "master",     "name": "掌握大师", "description": "专题进度达到 80%", "icon": "👑", "threshold": 80, "achieved": p >= 80},
-                {"key": "conqueror",  "name": "征服者", "description": "专题进度达到 95%", "icon": "🏆", "threshold": 95, "achieved": p >= 95},
+        def _milestones(p):
+            return [
+                {"key": "first_blood", "name": "首次突破", "description": "专题进度达到 10%",  "icon": "🌱", "threshold": 10,  "achieved": p >= 10},
+                {"key": "half_way",   "name": "半程里程碑", "description": "专题进度达到 50%",  "icon": "🛤️", "threshold": 50,  "achieved": p >= 50},
+                {"key": "explorer",   "name": "探索者",     "description": "专题进度达到 60%",  "icon": "🧭", "threshold": 60,  "achieved": p >= 60},
+                {"key": "master",     "name": "掌握大师",   "description": "专题进度达到 80%",  "icon": "👑", "threshold": 80,  "achieved": p >= 80},
+                {"key": "conqueror",  "name": "征服者",     "description": "专题进度达到 95%",  "icon": "🏆", "threshold": 95,  "achieved": p >= 95},
             ]
 
-        overall_progress = sum(t["progress"] for t in topics) / len(topics) if topics else 0
+        categories_out = []
+        all_topic_progress = []
+        total_tags_all = 0
+        mastered_tags_all = 0
 
+        for cat in get_categories():
+            cat_topics = []
+            cat_progress_sum = 0
+            cat_tags = 0
+            cat_mastered = 0
+
+            for tpc in get_topics_by_category(cat.node_id):
+                m = _tag_mastery(tpc.tags)
+                progress = round(m["avg"] * 100, 1)
+                cat_progress_sum += progress
+                cat_tags += m["total"]
+                cat_mastered += m["matched"]
+
+                # 标签掌握度明细
+                tag_details = []
+                for tag in tpc.tags:
+                    p = db_mastery.get(tag, 0.5)
+                    tag_details.append({
+                        "name": tag,
+                        "p_known": round(p, 2),
+                        "status": _status(p),
+                        "matched": tag in db_mastery,
+                    })
+
+                cat_topics.append({
+                    "topic": tpc.name,
+                    "topic_id": tpc.node_id,
+                    "description": tpc.description,
+                    "progress": progress,
+                    "progress_text": f"{progress:.0f}%",
+                    "status": _status(m["avg"]),
+                    "statistics": {
+                        "total_tags": m["total"],
+                        "matched_tags": m["matched"],
+                        "avg_mastery": round(m["avg"], 2),
+                    },
+                    "tags": tag_details,
+                    "milestones": _milestones(progress),
+                })
+
+            cat_progress = round(cat_progress_sum / len(cat_topics), 1) if cat_topics else 0
+            if cat_topics:
+                all_topic_progress.append(cat_progress)
+            total_tags_all += cat_tags
+            mastered_tags_all += cat_mastered
+
+            categories_out.append({
+                "topic": cat.name,
+                "topic_id": cat.node_id,
+                "description": cat.description,
+                "progress": cat_progress,
+                "progress_text": f"{cat_progress:.0f}%",
+                "status": _status(cat_progress / 100.0) if cat_topics else "locked",
+                "statistics": {
+                    "total_tags": cat_tags,
+                    "matched_tags": cat_mastered,
+                    "topic_count": len(cat_topics),
+                },
+                "nodes": cat_topics,  # 子专题作为"节点"展开
+                "milestones": _milestones(cat_progress),
+            })
+
+        overall_progress = round(sum(all_topic_progress) / len(all_topic_progress), 1) if all_topic_progress else 0
+
+        all_nodes = [n for cat in get_categories() for n in get_topics_by_category(cat.node_id)]
         statistics = {
-            "total_topics": len(topics),
-            "mastered_topics": sum(1 for t in topics if t["status"] == "mastered"),
-            "in_progress_topics": sum(1 for t in topics if t["status"] == "in_progress"),
-            "locked_topics": sum(1 for t in topics if t["status"] == "locked"),
-            "total_nodes": sum(t["statistics"]["total_nodes"] for t in topics),
-            "unlocked_nodes": sum(t["statistics"]["unlocked_nodes"] for t in topics),
-            "mastered_nodes": sum(t["statistics"]["mastered_nodes"] for t in topics),
+            "total_categories": len(categories_out),
+            "total_topics": len(all_nodes),
+            "total_knowledge_tags": total_tags_all,
+            "mastered_tags": mastered_tags_all,
+            "mastered_categories": sum(1 for c in categories_out if c["status"] == "mastered"),
+            "in_progress_categories": sum(1 for c in categories_out if c["status"] == "learning"),
+            "locked_categories": sum(1 for c in categories_out if c["status"] == "locked"),
         }
 
         return KnowledgeTreeResponse(
@@ -181,15 +195,15 @@ async def get_knowledge_tree_progress(
             statistics=statistics,
             topics=[
                 TopicProgressResponse(
-                    topic=t['topic'],
-                    progress=t['progress'],
-                    progress_text=t['progress_text'],
-                    status=t['status'],
-                    statistics=t['statistics'],
-                    nodes=t.get('nodes', []),
-                    milestones=t['milestones']
+                    topic=c['topic'],
+                    progress=c['progress'],
+                    progress_text=c['progress_text'],
+                    status=c['status'],
+                    statistics=c['statistics'],
+                    nodes=c.get('nodes', []),
+                    milestones=c['milestones']
                 )
-                for t in topics
+                for c in categories_out
             ]
         )
         

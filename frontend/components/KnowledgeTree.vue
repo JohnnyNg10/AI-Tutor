@@ -3,7 +3,7 @@
     <div class="tree-header">
       <div class="header-text">
         <h3>知识树学习进度</h3>
-        <p class="header-desc">基于知识点解锁率衡量学习进度，每个专题由多个细分知识点节点组成</p>
+        <p class="header-desc">基于知识图谱 · {{ totalTagCount }} 个知识点标签 · {{ totalTopicCount }} 个专题</p>
       </div>
       <div class="overall-progress">
         <div class="progress-circle" :style="{ background: getProgressGradient(overallProgress) }">
@@ -62,7 +62,10 @@
             </div>
             <div class="topic-info">
               <span class="topic-name">{{ topic.topic }}</span>
-              <span class="topic-subtitle">{{ topic.statistics.mastered_nodes }}/{{ topic.statistics.total_nodes }} 个知识点已掌握</span>
+              <span class="topic-subtitle">
+                <template v-if="topic.statistics.topic_count">{{ topic.statistics.topic_count }} 个子专题</template>
+                <template v-if="topic.statistics.total_tags">{{ topic.statistics.matched_tags || 0 }}/{{ topic.statistics.total_tags }} 个标签有学习记录</template>
+              </span>
             </div>
             <div class="topic-progress">
               <div class="progress-bar">
@@ -76,40 +79,53 @@
             <div class="expand-icon" :class="{ expanded: expandedTopics.includes(topic.topic) }">▼</div>
           </div>
 
-          <!-- 展开区：节点列表 + 里程碑 -->
+          <!-- 展开区：子专题 + 标签 + 里程碑 -->
           <div v-if="expandedTopics.includes(topic.topic)" class="topic-details">
-            <!-- 节点列表 -->
-            <div class="nodes-section">
+            <div v-if="topic.description" class="category-desc">📖 {{ topic.description }}</div>
+
+            <!-- 子专题列表 -->
+            <div v-if="topic.nodes && topic.nodes.length > 0" class="subtopics-section">
               <h4 class="section-title">
-                知识点节点
-                <span class="section-hint">— 点击展开的节点依赖关系表示学习路径</span>
+                子专题 ({{ topic.nodes.length }})
+                <span class="section-hint">— 基于知识图谱 {{ topic.statistics.total_tags || 0 }} 个知识点标签</span>
               </h4>
-              <div class="nodes-list">
-                <div
-                  v-for="node in topic.nodes"
-                  :key="node.node_id"
-                  class="node-item"
-                  :class="'node-' + node.status"
-                >
-                  <div class="node-status-icon">
-                    <span v-if="node.status === 'mastered'" title="已掌握 (p≥80%)">✅</span>
-                    <span v-else-if="node.status === 'learning'" title="学习中 (50%≤p<80%)">📖</span>
-                    <span v-else-if="node.status === 'weak'" title="薄弱 (30%≤p<50%)">⚠️</span>
-                    <span v-else title="未解锁 (p<30%)">🔒</span>
+
+              <div v-for="sub in topic.nodes" :key="sub.topic_id" class="subtopic-item" :class="'subtopic-' + sub.status">
+                <div class="subtopic-header" @click="toggleSub(sub.topic_id)">
+                  <div class="subtopic-status-icon">
+                    <span v-if="sub.status === 'mastered'" title="已掌握 (≥80%)">✅</span>
+                    <span v-else-if="sub.status === 'learning'" title="学习中 (50%-80%)">📖</span>
+                    <span v-else-if="sub.status === 'weak'" title="薄弱 (30%-50%)">⚠️</span>
+                    <span v-else title="未解锁 (<30%)">🔒</span>
                   </div>
-                  <div class="node-body">
-                    <div class="node-name">{{ node.name }}</div>
-                    <div class="node-meta">
-                      <div class="node-mastery-bar">
-                        <div
-                          class="node-mastery-fill"
-                          :style="{ width: (node.p_known * 100) + '%', background: getProgressColor(node.p_known * 100) }"
-                        ></div>
-                      </div>
-                      <span class="node-pct">{{ Math.round(node.p_known * 100) }}%</span>
-                      <span v-if="node.prerequisite_names && node.prerequisite_names.length > 0" class="node-prereq" :title="'前置依赖：' + node.prerequisite_names.join('、')">
-                        需先掌握：{{ node.prerequisite_names.join('、') }}
-                      </span>
+                  <div class="subtopic-info">
+                    <span class="subtopic-name">{{ sub.topic }}</span>
+                    <span class="subtopic-desc" v-if="sub.description">{{ sub.description }}</span>
+                    <span class="subtopic-tag-count">{{ sub.statistics.matched_tags }}/{{ sub.statistics.total_tags }} 标签有数据</span>
+                  </div>
+                  <div class="subtopic-progress">
+                    <div class="progress-bar small">
+                      <div class="progress-fill" :style="{ width: sub.progress + '%', background: getProgressColor(sub.progress) }"></div>
+                    </div>
+                    <span class="progress-text">{{ sub.progress_text }}</span>
+                  </div>
+                  <div class="expand-icon small" :class="{ expanded: expandedSubs.has(sub.topic_id) }">▼</div>
+                </div>
+
+                <!-- 标签掌握度 -->
+                <div v-if="expandedSubs.has(sub.topic_id) && sub.tags && sub.tags.length > 0" class="subtopic-tags">
+                  <div class="tag-grid">
+                    <div
+                      v-for="tag in sub.tags"
+                      :key="tag.name"
+                      class="tag-chip"
+                      :class="{ 'tag-matched': tag.matched, 'tag-default': !tag.matched }"
+                      :title="tag.matched ? '掌握度: ' + Math.round(tag.p_known * 100) + '%' : '尚无学习记录'"
+                    >
+                      <span class="tag-dot" :style="{ background: tag.matched ? getProgressColor(tag.p_known * 100) : '#d1d5db' }"></span>
+                      <span class="tag-name">{{ tag.name }}</span>
+                      <span v-if="tag.matched" class="tag-pct">{{ Math.round(tag.p_known * 100) }}%</span>
+                      <span v-else class="tag-no-data">-</span>
                     </div>
                   </div>
                 </div>
@@ -159,7 +175,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 const props = defineProps({ userId: { type: Number, default: null } })
 
@@ -168,7 +184,30 @@ const error = ref('')
 const isFallback = ref(false)
 const overallProgress = ref(0)
 const topics = ref([])
+const totalTagCount = computed(() => {
+  let n = 0
+  for (const t of topics.value) {
+    for (const sub of (t.nodes || [])) {
+      n += sub.tags?.length || 0
+    }
+  }
+  return n
+})
+const totalTopicCount = computed(() => {
+  let n = 0
+  for (const t of topics.value) n += (t.nodes || []).length
+  return n
+})
+
 const expandedTopics = ref([])
+const expandedSubs = ref(new Set())
+
+const toggleSub = (subId) => {
+  const s = new Set(expandedSubs.value)
+  if (s.has(subId)) s.delete(subId)
+  else s.add(subId)
+  expandedSubs.value = s
+}
 
 const getStatusText = (status) => ({
   mastered: '已掌握', in_progress: '学习中', locked: '未解锁', not_started: '未开始'
@@ -395,6 +434,56 @@ onMounted(() => { fetchKnowledgeTree() })
   font-size: 10px; color: #9ca3af; cursor: help;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;
 }
+
+/* Category description */
+.category-desc { font-size: 13px; color: #6b7280; margin-bottom: 12px; padding: 8px 12px; background: #f9fafb; border-radius: 8px; line-height: 1.6; }
+
+/* Sub-topics */
+.subtopics-section { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+
+.subtopic-item { border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; transition: all 0.2s; }
+.subtopic-item:hover { box-shadow: 0 1px 4px rgba(0,0,0,.04); }
+.subtopic-item.subtopic-mastered { border-color: #a7f3d0; background: rgba(16,185,129,.02); }
+.subtopic-item.subtopic-learning { border-color: #93c5fd; }
+.subtopic-item.subtopic-weak { border-color: #fcd34d; }
+.subtopic-item.subtopic-locked { opacity: 0.7; }
+
+.subtopic-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; cursor: pointer; transition: background 0.15s;
+}
+.subtopic-header:hover { background: rgba(0,0,0,.015); }
+
+.subtopic-status-icon { font-size: 14px; width: 22px; text-align: center; flex-shrink: 0; }
+.subtopic-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.subtopic-name { font-size: 13px; font-weight: 500; color: #1d1d1f; }
+.subtopic-desc { font-size: 11px; color: #86868b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.subtopic-tag-count { font-size: 10px; color: #9ca3af; }
+
+.subtopic-progress {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 80px;
+}
+.progress-bar.small { width: 60px; height: 4px; }
+.expand-icon.small { font-size: 10px; }
+
+/* Tag chips */
+.subtopic-tags { padding: 8px 12px 12px 44px; border-top: 1px solid #f3f4f6; }
+
+.tag-grid { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.tag-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 12px; font-size: 11px;
+  cursor: help; transition: all 0.15s;
+}
+.tag-chip.tag-matched { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+.tag-chip.tag-default { background: #f9fafb; border: 1px solid #e5e7eb; color: #9ca3af; }
+.tag-chip:hover { transform: translateY(-1px); }
+
+.tag-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.tag-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-pct { font-weight: 600; font-size: 10px; }
+.tag-no-data { font-size: 10px; color: #d1d5db; }
 
 /* Milestones */
 .milestone-list { display: flex; flex-wrap: wrap; gap: 8px; }
