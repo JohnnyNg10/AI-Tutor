@@ -101,7 +101,7 @@
                   <div class="subtopic-info">
                     <span class="subtopic-name">{{ sub.topic }}</span>
                     <span class="subtopic-desc" v-if="sub.description">{{ sub.description }}</span>
-                    <span class="subtopic-tag-count">{{ sub.statistics.matched_tags }}/{{ sub.statistics.total_tags }} 标签有数据</span>
+                    <span class="subtopic-tag-count">{{ sub.statistics.matched_tags }}/{{ sub.statistics.total_tags }} 已学习</span>
                   </div>
                   <div class="subtopic-progress">
                     <div class="progress-bar small">
@@ -120,12 +120,12 @@
                       :key="tag.name"
                       class="tag-chip"
                       :class="{ 'tag-matched': tag.matched, 'tag-default': !tag.matched }"
-                      :title="tag.matched ? '掌握度: ' + Math.round(tag.p_known * 100) + '%' : '尚无学习记录'"
+                      :title="tag.matched ? '掌握度: ' + Math.round(tag.p_known * 100) + '%' : '尚未学习'"
                     >
-                      <span class="tag-dot" :style="{ background: tag.matched ? getProgressColor(tag.p_known * 100) : '#d1d5db' }"></span>
+                      <span class="tag-dot" :style="{ background: tag.matched ? getProgressColor(tag.p_known * 100) : '#e5e7eb' }"></span>
                       <span class="tag-name">{{ tag.name }}</span>
                       <span v-if="tag.matched" class="tag-pct">{{ Math.round(tag.p_known * 100) }}%</span>
-                      <span v-else class="tag-no-data">-</span>
+                      <span v-else class="tag-no-data">未学习</span>
                     </div>
                   </div>
                 </div>

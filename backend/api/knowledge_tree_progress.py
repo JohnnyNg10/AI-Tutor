@@ -83,15 +83,19 @@ async def get_knowledge_tree_progress(
         db_mastery = await get_user_mastery_dict(db, user_id)
 
         def _tag_mastery(tags):
-            """计算一组标签的掌握度：匹配到的取均值，未匹配的默认 0.5"""
+            """计算一组标签的掌握度。只有有学习记录的标签参与进度计算，无记录的标签进度为 0。"""
             scores = []
             for tag in tags:
                 if tag in db_mastery:
                     scores.append(db_mastery[tag])
             if not scores:
-                return { "avg": 0.5, "matched": 0, "total": len(tags), "scores": [] }
-            return { "avg": sum(scores) / len(scores), "matched": len(scores),
-                     "total": len(tags), "scores": scores }
+                return { "avg": 0, "matched": 0, "total": len(tags), "scores": [],
+                         "coverage": 0 }  # 没有任何学习记录 → 进度 0%
+            avg_mastery = sum(scores) / len(scores)
+            coverage = len(scores) / len(tags)  # 已学习标签占比
+            # 综合进度 = 已学习覆盖率 × 平均掌握度
+            return { "avg": avg_mastery, "matched": len(scores),
+                     "total": len(tags), "scores": scores, "coverage": round(coverage, 2) }
 
         def _status(p):
             if p >= 0.8: return "mastered"
@@ -121,21 +125,32 @@ async def get_knowledge_tree_progress(
 
             for tpc in get_topics_by_category(cat.node_id):
                 m = _tag_mastery(tpc.tags)
-                progress = round(m["avg"] * 100, 1)
+                # 综合进度 = 覆盖率 × 平均掌握度（无记录时 = 0，不会虚高）
+                progress = round(m["coverage"] * m["avg"] * 100, 1) if m["matched"] > 0 else 0
                 cat_progress_sum += progress
                 cat_tags += m["total"]
                 cat_mastered += m["matched"]
 
-                # 标签掌握度明细
+                # 标签掌握度明细：未匹配的标签 p_known=0，状态 locked
                 tag_details = []
                 for tag in tpc.tags:
-                    p = db_mastery.get(tag, 0.5)
+                    if tag in db_mastery:
+                        p = db_mastery[tag]
+                        matched = True
+                    else:
+                        p = 0
+                        matched = False
                     tag_details.append({
                         "name": tag,
                         "p_known": round(p, 2),
-                        "status": _status(p),
-                        "matched": tag in db_mastery,
+                        "status": _status(p) if matched else "locked",
+                        "matched": matched,
                     })
+
+                # 子专题的状态取决于覆盖率（至少学过一半标签才算 in_progress）
+                subtopic_status = "locked"
+                if m["matched"] > 0:
+                    subtopic_status = _status(m["coverage"] * m["avg"])
 
                 cat_topics.append({
                     "topic": tpc.name,
@@ -143,11 +158,12 @@ async def get_knowledge_tree_progress(
                     "description": tpc.description,
                     "progress": progress,
                     "progress_text": f"{progress:.0f}%",
-                    "status": _status(m["avg"]),
+                    "status": subtopic_status,
                     "statistics": {
                         "total_tags": m["total"],
                         "matched_tags": m["matched"],
-                        "avg_mastery": round(m["avg"], 2),
+                        "avg_mastery": round(m["avg"], 2) if m["matched"] > 0 else 0,
+                        "coverage": m["coverage"],
                     },
                     "tags": tag_details,
                     "milestones": _milestones(progress),
@@ -159,13 +175,19 @@ async def get_knowledge_tree_progress(
             total_tags_all += cat_tags
             mastered_tags_all += cat_mastered
 
+            # 主干状态：覆盖率 > 0 才算有进度
+            if cat_progress >= 80: cat_status = "mastered"
+            elif cat_progress >= 30: cat_status = "in_progress"
+            elif cat_mastered > 0: cat_status = "in_progress"
+            else: cat_status = "locked"
+
             categories_out.append({
                 "topic": cat.name,
                 "topic_id": cat.node_id,
                 "description": cat.description,
                 "progress": cat_progress,
                 "progress_text": f"{cat_progress:.0f}%",
-                "status": _status(cat_progress / 100.0) if cat_topics else "locked",
+                "status": cat_status,
                 "statistics": {
                     "total_tags": cat_tags,
                     "matched_tags": cat_mastered,
