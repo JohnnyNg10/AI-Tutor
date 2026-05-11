@@ -87,7 +87,16 @@ async def _upsert_bkt_mastery(
     for topic_name in topic_names:
         kp = kp_by_name.get(topic_name)
         if not kp:
-            continue
+            # 知识点表无此记录 → 自动创建，确保 BKT 写入不丢失
+            kp = KnowledgePoint(
+                name=topic_name,
+                description="",
+                parent_id=None,
+                level=1,
+            )
+            db.add(kp)
+            await db.flush()
+            kp_by_name[topic_name] = kp
 
         ukm_stmt = select(UserKnowledgeMastery).where(
             and_(
