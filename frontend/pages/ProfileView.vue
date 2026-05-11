@@ -150,33 +150,6 @@
         </div>
       </section>
 
-      <section class="grid-two">
-        <div class="card">
-          <h2>掌握度雷达维度（Top）</h2>
-          <div v-if="dashboard.radar_dimensions.length === 0" class="empty">暂无掌握度数据</div>
-          <div v-else>
-            <div v-for="item in dashboard.radar_dimensions" :key="item.knowledge_point" class="progress-row">
-              <div class="label">{{ item.knowledge_point }}</div>
-              <div class="bar-wrap">
-                <div class="bar" :class="item.color" :style="{ width: `${Math.round((item.mastery || 0) * 100)}%` }"></div>
-              </div>
-              <div class="value">{{ Math.round((item.mastery || 0) * 100) }}%</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>错题分布（按知识点）</h2>
-          <div v-if="distributionList.length === 0" class="empty">暂无错题分布数据</div>
-          <div v-else>
-            <div v-for="item in distributionList" :key="item.kp" class="distribution-row">
-              <span>{{ item.kp }}</span>
-              <strong>{{ item.count }}</strong>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- 六维能力雷达图 -->
       <section class="six-dim-section">
         <SixDimRadarChart :user-id="userId" />
@@ -226,20 +199,10 @@ const error = ref('')
 const userId = ref(null)
 
 const dashboard = ref({
-  radar_dimensions: [],
   ability_curve: [],
-  mistake_distribution: {},
 })
 
 
-
-const distributionList = computed(() => {
-  const raw = dashboard.value?.mistake_distribution || {}
-  return Object.entries(raw)
-    .map(([kp, count]) => ({ kp, count: Number(count) || 0 }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 12)
-})
 
 const chartData = computed(() => {
   const width = 820
@@ -376,18 +339,6 @@ const loadAll = async () => {
     const token = localStorage.getItem('access_token')
     const headers = { 'Authorization': `Bearer ${token}` }
 
-    // 获取掌握度可视化数据
-    try {
-      const masteryRes = await fetch('/api/mastery/visualization', { headers }).then(r => r.json())
-      if (masteryRes.success && masteryRes.mastery_levels?.length) {
-        dashboard.value.radar_dimensions = masteryRes.mastery_levels.map(m => ({
-          knowledge_point: m.knowledge_point_name,
-          mastery: m.p_known,
-          color: m.p_known >= 0.8 ? 'green' : m.p_known >= 0.5 ? 'yellow' : 'red'
-        }))
-      }
-    } catch {}
-
     // 获取画像数据（当前快照 + 历史曲线）
     try {
       const advisorRes = await fetch('/api/advisor/profile', { headers }).then(r => r.json())
@@ -399,9 +350,6 @@ const loadAll = async () => {
           theta_ci_lower: Math.max(0, (d.theta || 0) - 1.96 * (d.theta_se || 0.7)),
           theta_ci_upper: (d.theta || 0) + 1.96 * (d.theta_se || 0.7)
         }]
-        if (d.knowledge_mastery) {
-          dashboard.value.mistake_distribution = d.knowledge_mastery
-        }
       }
     } catch {}
 
@@ -553,7 +501,6 @@ onMounted(loadAll)
 .card { background: #fff; border: 1px solid #e9edf2; border-radius: 14px; padding: 16px; margin-bottom: 16px; }
 .card h2 { font-size: 16px; margin-bottom: 12px; }
 .empty { color: #888; font-size: 14px; }
-.grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .ability-chart-wrap {
   width: 100%;
   border: 1px solid #eef1f5;
@@ -629,12 +576,6 @@ onMounted(loadAll)
 .curve-item { border: 1px solid #eef1f5; border-radius: 10px; padding: 10px; }
 .curve-head { display: flex; justify-content: space-between; font-size: 13px; color: #444; }
 .curve-ci { font-size: 12px; color: #6b7280; margin-top: 4px; }
-.progress-row { display: grid; grid-template-columns: 160px 1fr 64px; gap: 10px; align-items: center; margin-bottom: 10px; }
-.label { font-size: 13px; color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar-wrap { height: 10px; border-radius: 999px; background: #edf1f5; overflow: hidden; }
-.bar { height: 100%; border-radius: 999px; }
-.bar.green { background: #16a34a; }
-.bar.yellow { background: #f59e0b; }
 
 /* 六维能力雷达图区域 */
 .six-dim-section {
@@ -656,16 +597,13 @@ onMounted(loadAll)
 .badge-section, .pitfall-section {
   margin-top: 24px;
 }
-.bar.red { background: #ef4444; }
 .value { text-align: right; font-size: 12px; color: #6b7280; }
-.distribution-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #eef1f5; font-size: 13px; }
 .stats { display: grid; gap: 8px; color: #374151; font-size: 14px; }
 
 @media (max-width: 900px) {
   .sidebar { width: 64px; }
   .main-content { margin-left: 64px; }
   .user-info, .quick-nav span:last-child, .logout-btn span:last-child, .user-level { display: none; }
-  .grid-two { grid-template-columns: 1fr; }
   .ability-chart { height: 240px; }
   .axis-label { font-size: 10px; }
   .curve-list { grid-template-columns: 1fr; }
