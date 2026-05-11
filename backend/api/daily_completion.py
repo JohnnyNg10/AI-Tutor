@@ -141,7 +141,7 @@ async def record_question_answer(
     try:
         service = DailyCompletionService()
         result = service.record_question_answer(
-            user_id=current_user['id'],
+            user_id=current_user.id,
             question_id=request.question_id,
             is_correct=request.is_correct,
             actual_score=request.actual_score,
@@ -181,7 +181,7 @@ async def get_completion_status(
     """
     try:
         service = DailyCompletionService()
-        status = service.check_completion_status(current_user['id'])
+        status = service.check_completion_status(current_user.id)
         
         return CompletionStatusResponse(
             is_completed=status['is_completed'],
@@ -208,7 +208,7 @@ async def get_completion_summary_endpoint(
     """
     try:
         service = DailyCompletionService()
-        summary = service.generate_completion_summary(current_user['id'])
+        summary = service.generate_completion_summary(current_user.id)
         
         if not summary:
             raise HTTPException(
@@ -287,7 +287,7 @@ async def get_daily_progress_endpoint(
     """
     try:
         service = DailyCompletionService()
-        progress = service.get_daily_progress(current_user['id'])
+        progress = service.get_daily_progress(current_user.id)
         
         return {
             'success': True,

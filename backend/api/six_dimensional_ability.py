@@ -25,7 +25,7 @@ from services.six_dimensional_ability_service import (
     get_user_six_dimensional_ability
 )
 from utils.logger import logger
-from utils.auth import get_current_user
+from services.auth_service import get_current_user
 
 router = APIRouter(prefix="/six-dim-ability", tags=["六维能力画像"])
 
@@ -100,7 +100,7 @@ async def get_ability_profile(
     返回用户的六维能力分数和综合评估
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimensionalAbilityService()
         
@@ -140,7 +140,7 @@ async def calculate_ability(
     从交互日志和能力历史中重新计算六维能力
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimensionalAbilityService()
         ability = service.calculate_six_dimensional_ability(user_id)
@@ -175,7 +175,7 @@ async def get_dimension_detail(
     返回指定维度的详细分析、描述和提升建议
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimensionalAbilityService()
         detail = service.get_ability_detail(user_id, dimension)
@@ -211,7 +211,7 @@ async def get_radar_chart_data(
     返回前端雷达图组件所需的数据格式
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimensionalAbilityService()
         ability = service.get_cached_ability(user_id)
@@ -274,7 +274,7 @@ async def get_ability_history(
     返回指定天数内的六维能力变化历史
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimensionalAbilityService()
         history = service.get_ability_history(user_id, days)
@@ -302,7 +302,7 @@ async def compare_ability(
     与平均水平、同龄人或优秀用户对比
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimensionalAbilityService()
         ability = service.get_cached_ability(user_id)

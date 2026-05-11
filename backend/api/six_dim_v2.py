@@ -86,7 +86,7 @@ async def get_realtime_ability(
     基于最近交互实时计算的能力值，包含置信度
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimV2Service()
         ability = service.get_ability_with_confidence(user_id)
@@ -115,7 +115,7 @@ async def recalculate_ability(
     强制基于最新交互重新计算六维能力
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimV2Service()
         metrics = service.calculate_realtime_ability(user_id)
@@ -152,7 +152,7 @@ async def get_dynamic_radar(
     支持前端实时动态渲染，包含动画帧数据
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimV2Service()
         radar_data = service.generate_dynamic_radar_data(user_id, animation_frames)
@@ -182,7 +182,7 @@ async def get_interaction_pattern(
     分析用户的提示点击率、跳过率等行为模式
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimV2Service()
         pattern = service.analyze_interaction_pattern(user_id)
@@ -214,7 +214,7 @@ async def get_dimension_trend(
     返回指定维度在指定时间范围内的变化趋势
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SixDimV2Service()
         trend = service.get_dimension_trend(user_id, dimension, hours)
@@ -242,7 +242,7 @@ async def compare_v1_v2(
     展示V1（基础计算）和V2（实时动态）的差异
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         from services.six_dimensional_ability_service import SixDimensionalAbilityService
         

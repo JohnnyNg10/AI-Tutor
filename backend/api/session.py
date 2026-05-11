@@ -99,7 +99,7 @@ async def create_session(
     对应需求27: 创建Session，存储题号等基本信息
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SessionService()
         session_id = service.create_session(
@@ -132,7 +132,7 @@ async def get_session(
     返回Session的完整状态信息
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SessionService()
         session = service.get_session(session_id)
@@ -176,7 +176,7 @@ async def update_session(
     对应需求27: 更新hint_level、对话摘要等
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SessionService()
         
@@ -219,7 +219,7 @@ async def add_message(
     对应需求27: 维护多轮对话上下文
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SessionService()
         
@@ -264,7 +264,7 @@ async def get_conversation_context(
     对应需求27: 获取多轮对话历史，用于Agent生成响应
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SessionService()
         
@@ -299,7 +299,7 @@ async def get_user_sessions(
     获取用户的Session列表
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SessionService()
         sessions = service.get_user_active_sessions(user_id, limit)
@@ -322,7 +322,7 @@ async def delete_session(
 ):
     """删除Session"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SessionService()
         
@@ -355,7 +355,7 @@ async def extend_session_ttl(
 ):
     """延长Session TTL"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SessionService()
         
@@ -396,7 +396,7 @@ async def get_or_create_session_endpoint(
     如果该题目已有活跃Session，返回现有Session；否则创建新Session
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         session_id = get_or_create_session(
             user_id=user_id,

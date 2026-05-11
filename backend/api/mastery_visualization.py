@@ -20,6 +20,8 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Depends, Query
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from database.db import get_db
 from services.mastery_visualization_service import (
     MasteryVisualizationService,
     get_user_mastery_visualization
@@ -129,7 +131,7 @@ async def get_mastery_visualization(
     - 专题进度
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"获取掌握度可视化数据: 用户={user_id}")
         
         viz_data = get_user_mastery_visualization(user_id, topics)
@@ -153,7 +155,7 @@ async def get_knowledge_point_mastery(
     获取单个知识点的掌握度详情
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = MasteryVisualizationService()
         mastery_data = service.get_user_mastery_from_redis(user_id)
@@ -187,7 +189,7 @@ async def get_topic_progress(
     计算公式：进度百分比 = (P(L) >= 0.8的知识点数量) / (该专题总知识点数量)
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"获取专题进度: 用户={user_id}, 专题={topic}")
         
         service = MasteryVisualizationService()
@@ -219,27 +221,15 @@ async def get_topic_progress(
 @router.get("/ability-curve", response_model=AbilityCurveResponse)
 async def get_ability_curve(
     days: int = Query(30, ge=7, le=90, description="天数范围"),
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """
-    获取能力曲线数据
-    
-    用于绘制IRT θ值变化趋势图
-    """
+    """获取能力曲线数据（真实DB查询）"""
     try:
-        user_id = current_user.get('id', 0)
-        logger.info(f"获取能力曲线: 用户={user_id}, 天数={days}")
-        
+        user_id = current_user.id
         service = MasteryVisualizationService()
-        curve_data = service.get_ability_curve_data(user_id, days)
-        
-        return AbilityCurveResponse(
-            success=True,
-            user_id=user_id,
-            days=days,
-            data=curve_data
-        )
-        
+        curve_data = await service.get_ability_curve_data(db, user_id, days)
+        return AbilityCurveResponse(success=True, user_id=user_id, days=days, data=curve_data)
     except Exception as e:
         logger.error(f"获取能力曲线失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -280,7 +270,7 @@ async def get_ring_component(
     - P(L) >= 0.8: 绿色（掌握区）#52C41A
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = MasteryVisualizationService()
         mastery_data = service.get_user_mastery_from_redis(user_id)
@@ -321,7 +311,7 @@ async def get_water_drop_component(
     - 波浪高度根据掌握度动态调整
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = MasteryVisualizationService()
         mastery_data = service.get_user_mastery_from_redis(user_id)
@@ -362,7 +352,7 @@ async def get_component_config(
     返回前端可视化组件的完整配置参数
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = MasteryVisualizationService()
         mastery_data = service.get_user_mastery_from_redis(user_id)
@@ -413,7 +403,7 @@ async def get_mastery_summary(
     获取掌握度摘要（用于首页展示）
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         viz_data = get_user_mastery_visualization(user_id)
         

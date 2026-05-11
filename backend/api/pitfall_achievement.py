@@ -16,10 +16,13 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Depends
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from database.db import get_db
 from services.pitfall_achievement_service import (
     PitfallAchievementService,
     get_user_dual_column_cards
@@ -92,30 +95,38 @@ class ErrorTypeLabelsResponse(BaseModel):
 
 @router.get("/dual-column", response_model=DualColumnResponse)
 async def get_dual_column(
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     获取雷区与成就双列卡片
-    
-    对应行号14: 摒弃传统占比饼图，以双列卡片展示易错陷阱和已攻克的难关
-    
+
     左列（雷区）：高频易错点
     右列（成就）：已攻克的难关
     """
     try:
-        user_id = current_user.get('id', 0)
-        
+        user_id = current_user.id
+
         service = PitfallAchievementService()
-        data = service.get_dual_column_for_display(user_id)
-        
+        data = await service.get_dual_column_async(db, user_id)
+
+        now_iso = datetime.now().isoformat()
         return DualColumnResponse(
             success=True,
             user_id=user_id,
-            updated_at=data['updated_at'],
-            left_column=data['left_column'],
-            right_column=data['right_column']
+            updated_at=now_iso,
+            left_column={
+                'title': '⚠️ 高频雷区',
+                'subtitle': f"共{data['pitfall_count']}个易错点需要关注",
+                'cards': data['pitfalls']
+            },
+            right_column={
+                'title': '🏆 已攻克的难关',
+                'subtitle': f"共{data['achievement_count']}个知识点已掌握",
+                'cards': data['achievements']
+            }
         )
-        
+
     except Exception as e:
         logger.error(f"获取双列卡片失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -131,7 +142,7 @@ async def get_pitfalls(
     模块A：结合系统提取的易错点标签，列出学生最常踩坑的具体行为
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = PitfallAchievementService()
         pitfalls = service.identify_pitfalls(user_id)
@@ -170,7 +181,7 @@ async def get_achievements(
     模块B：展示曾经在复习队列中频繁做错，但近期掌握度已跨越0.8的题目或知识点
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = PitfallAchievementService()
         achievements = service.identify_achievements(user_id)
@@ -242,7 +253,7 @@ async def refresh_dual_column(
 ):
     """刷新双列卡片数据"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = PitfallAchievementService()
         data = service.generate_dual_column_data(user_id)
@@ -267,7 +278,7 @@ async def get_summary(
 ):
     """获取雷区与成就摘要"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = PitfallAchievementService()
         pitfalls = service.identify_pitfalls(user_id)

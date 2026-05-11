@@ -25,11 +25,8 @@
         <router-link to="/recommend" class="nav-item active">
           <span class="nav-icon">✨</span><span>智能推荐</span>
         </router-link>
-        <router-link to="/exercises" class="nav-item">
-          <span class="nav-icon">📝</span><span>练习中心</span>
-        </router-link>
         <router-link to="/mistake-book" class="nav-item">
-          <span class="nav-icon">📕</span><span>错题本</span>
+          <span class="nav-icon">📝</span><span>练习中心</span>
         </router-link>
         <router-link to="/profile" class="nav-item">
           <span class="nav-icon">📊</span><span>学习画像</span>
@@ -66,6 +63,16 @@
 
         <!-- 错误提示 -->
         <div v-if="error" class="error-banner">{{ error }}</div>
+
+        <!-- 继续上次练习横幅 -->
+        <div v-if="hasSavedSession" class="continue-banner">
+          <span class="continue-icon">📝</span>
+          <span>你还有未完成的练习（已做 <strong>{{ savedProgress }}</strong> 题）</span>
+          <div class="continue-actions">
+            <button class="btn-continue" @click="_initWithSavedSession()">继续上次</button>
+            <button class="btn-fresh" @click="_startFresh">重新开始</button>
+          </div>
+        </div>
 
         <!-- Advisor 模式 + 画像快照 -->
         <div v-if="profileSnap.theta" class="advisor-mode-card" :class="advisorModeClass">
@@ -257,12 +264,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { advisorAPI, chatAPI } from '../services/apiService'
-import katex from 'katex'
+import { renderMath, isChoice, parseChoices, diffClass, isImageAvatar } from '../composables/useQuestionUtils.js'
+import { useRecommendSession } from '../composables/useRecommendSession.js'
 
 const router = useRouter()
+const { saveSession, loadSession, clearSession } = useRecommendSession()
 
 // 侧边栏
 const isSidebarCollapsed = ref(false)
@@ -280,7 +289,6 @@ const loadUserInfo = () => {
     }
   } catch {}
 }
-const isImageAvatar = (a) => a && (a.startsWith('data:') || a.startsWith('blob:') || a.startsWith('http'))
 const logout = () => { if (confirm('确定要退出登录吗？')) router.push('/') }
 
 // 状态
@@ -345,88 +353,7 @@ const modeName = computed(() => ({
 }[advisorMode.value] || '智能模式'))
 
 const pct = (v) => v != null ? (v * 100).toFixed(0) + '%' : '-'
-const diffClass = (d) => d <= 1 ? 'easy' : d <= 2 ? 'medium' : d <= 3 ? 'hard' : 'expert'
 const toneClass = (t) => ({ '鼓励型': 'encourage', '激励型': 'motivate', '中性': 'neutral' }[t] || 'neutral')
-
-// -------- 数学公式渲染 --------
-const renderMath = (text) => {
-  if (!text) return ''
-  let content = String(text)
-  const mathBlocks = []
-
-  // 兼容 \[...\] 和 \(...\) 语法
-  content = content
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_, f) => `$$${f}$$`)
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_, f) => `$${f}$`)
-
-  // 块级公式 $$...$$
-  content = content.replace(/\$\$([\s\S]*?)\$\$/g, (_, formula) => {
-    try {
-      const html = katex.renderToString(formula.trim(), { throwOnError: false, displayMode: true })
-      const token = `@@MATH${mathBlocks.length}@@`
-      mathBlocks.push(html)
-      return token
-    } catch { return `<span class="latex-error">${formula}</span>` }
-  })
-
-  // 行内公式 $...$
-  content = content.replace(/\$([^\n$]+?)\$/g, (_, formula) => {
-    try {
-      const html = katex.renderToString(formula.trim(), { throwOnError: false, displayMode: false })
-      const token = `@@MATH${mathBlocks.length}@@`
-      mathBlocks.push(html)
-      return token
-    } catch { return `<span class="latex-error">${formula}</span>` }
-  })
-
-  // 普通文本转义（避免 XSS），再恢复 token
-  content = content
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>')
-  content = content.replace(/@@MATH(\d+)@@/g, (_, i) => mathBlocks[Number(i)] || '')
-  return content
-}
-
-// -------- 题型判断 --------
-const isChoice = (item) =>
-  ['single_choice', 'multiple_choice', 'choice'].includes((item.question_type || '').toLowerCase())
-
-/**
- * 从题目 content 里解析选项，支持：
- *   "A. xxx  B. xxx  C. xxx  D. xxx"
- *   "A）xxx\nB）xxx"
- *   "（A）xxx  （B）xxx"
- */
-const parseChoices = (content) => {
-  if (!content) return []
-  // 先把题干与选项分开：找到第一个 A. / A） / （A） 的位置
-  const splitReg = /(?:^|\n)\s*[（(]?A[）)．.\s]/
-  const splitIdx = content.search(splitReg)
-  const optionStr = splitIdx >= 0 ? content.slice(splitIdx) : content
-
-  // 按 B/C/D 边界切割（允许选项文字含任何字符，包括公式）
-  const parts = optionStr.split(/\n?\s*[（(]?([B-D])[）)．.\s]/)
-  const opts = []
-
-  if (parts.length >= 3) {
-    // parts[0] = A 选项内容，parts[1] = 'B', parts[2] = B 选项内容, ...
-    const firstMatch = optionStr.match(/[（(]?A[）)．.\s]\s*(.+?)(?=\s*[（(]?B[）)．.\s]|$)/s)
-    if (firstMatch) opts.push({ key: 'A', text: firstMatch[1].trim() })
-    for (let i = 1; i + 1 < parts.length; i += 2) {
-      opts.push({ key: parts[i], text: parts[i + 1].trim() })
-    }
-  }
-
-  // fallback：按行解析
-  if (opts.length < 2) {
-    const lines = content.split('\n')
-    for (const line of lines) {
-      const m = line.trim().match(/^[（(]?([A-D])[）)．.\s]\s*(.+)/)
-      if (m) opts.push({ key: m[1], text: m[2].trim() })
-    }
-  }
-  return opts
-}
 
 const selectChoice = (item, key) => {
   selectedChoice[item.id] = key
@@ -464,6 +391,7 @@ const submitChoiceAnswer = async (item) => {
   }
 
   await _doFeedback(item, isCorrect)
+  saveSessionFromCurrentState()
 }
 
 // -------- 大题 AI 批改提交 --------
@@ -500,6 +428,7 @@ const submitEssayAnswer = async (item) => {
     }
 
     await _doFeedback(item, isCorrect)
+    saveSessionFromCurrentState()
   } catch (e) {
     alert(e?.message || 'AI批改失败，请重试')
   } finally {
@@ -533,56 +462,63 @@ const _requestDiagnosis = async (item, chosenKey, userAnswer) => {
 const goNext = () => {
   currentResult.value = null
   currentIndex.value++
+  saveSessionFromCurrentState()
 }
 
-// -------- 公共：把结果写入画像 --------
-const _doFeedback = async (item, isCorrect) => {
-  try {
-    await advisorAPI.submitFeedback({
-      questionId: item.id,
-      isCorrect,
-      hintCount: 0,
-      timeSpent: null,
-      algorithmVersion: 'advisor-v1',
-      recommendationSessionId: `web-${Date.now()}`,
-    })
-    submittedSet.value = new Set([...submittedSet.value, item.id])
+// -------- 公共：异步反馈（非阻塞）--------
+const pendingFeedbacks = new Set()
 
-    // 若全部完成，刷新画像快照
-    if (submittedSet.value.size === recommendations.value.length) {
-      try {
-        const prof = await advisorAPI.getProfile()
-        const snap = prof?.data || {}
-        Object.assign(profileSnap, {
-          theta: snap.theta,
-          avg_mastery: snap.avg_mastery,
-          weak_kps: Object.entries(snap.knowledge_mastery || {})
-            .sort((a, b) => a[1] - b[1]).slice(0, 3).map(e => e[0]),
-          total_questions: snap.total_questions,
-        })
-      } catch {}
-    }
-  } catch (e) {
-    alert(e?.message || '提交失败，请重试')
-  }
+const _submitFeedback = (item, payload) => {
+  const key = `${item.id}_${Date.now()}`
+  pendingFeedbacks.add(key)
+  advisorAPI.submitFeedback(payload)
+    .then(() => {
+      submittedSet.value = new Set([...submittedSet.value, item.id])
+      if (submittedSet.value.size === recommendations.value.length) {
+        advisorAPI.getProfile().then(prof => {
+          const snap = prof?.data || {}
+          Object.assign(profileSnap, {
+            theta: snap.theta,
+            avg_mastery: snap.avg_mastery,
+            weak_kps: Object.entries(snap.knowledge_mastery || {})
+              .sort((a, b) => a[1] - b[1]).slice(0, 3).map(e => e[0]),
+            total_questions: snap.total_questions,
+          })
+        }).catch(() => {})
+      }
+    })
+    .catch(() => {
+      // 静默失败，下次加载时重试
+    })
+    .finally(() => {
+      pendingFeedbacks.delete(key)
+    })
 }
 
-// -------- 跳过 --------
-const skipQuestion = async (item, skipReason) => {
-  try {
-    await advisorAPI.submitFeedback({
-      questionId: item.id,
-      isCorrect: skipReason === 'too_easy',
-      skipReason,
-      algorithmVersion: 'advisor-v1',
-    })
-    submittedSet.value = new Set([...submittedSet.value, item.id])
-    skipCount.value++
-    currentResult.value = null
-    currentIndex.value++
-  } catch (e) {
-    alert(e?.message || '跳过提交失败')
-  }
+const _doFeedback = (item, isCorrect) => {
+  _submitFeedback(item, {
+    questionId: item.id,
+    isCorrect,
+    hintCount: 0,
+    timeSpent: null,
+    algorithmVersion: 'advisor-v1',
+    recommendationSessionId: `web-${Date.now()}`,
+  })
+}
+
+// -------- 跳过（即时切换 + 后台提交）--------
+const skipQuestion = (item, skipReason) => {
+  _submitFeedback(item, {
+    questionId: item.id,
+    isCorrect: skipReason === 'too_easy',
+    skipReason,
+    algorithmVersion: 'advisor-v1',
+  })
+  submittedSet.value = new Set([...submittedSet.value, item.id])
+  skipCount.value++
+  currentResult.value = null
+  currentIndex.value++
+  saveSessionFromCurrentState()
 }
 
 // -------- 检查 Redis --------
@@ -620,6 +556,10 @@ const loadRecommendations = async () => {
     recommendations.value = []
   } finally {
     loading.value = false
+    if (recommendations.value.length > 0) {
+      clearSession()
+      saveSessionFromCurrentState()
+    }
   }
 }
 
@@ -636,13 +576,88 @@ const initAndLoad = async () => {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 会话持久化
+// ---------------------------------------------------------------------------
+const saveSessionFromCurrentState = () => {
+  saveSession({
+    recommendations: recommendations.value,
+    currentIndex: currentIndex.value,
+    correctCount: correctCount.value,
+    wrongCount: wrongCount.value,
+    skipCount: skipCount.value,
+    answerMap: answerMap,
+    selectedChoice: selectedChoice,
+    submittedSet: submittedSet.value,
+    isCompleted: allDone.value,
+    advisorMode: advisorMode.value,
+    advisorInstruction: advisorInstruction.value,
+    profileSnap: profileSnap,
+    limit: limit.value,
+  })
+}
+
+const _applySavedState = (s) => {
+  recommendations.value = s.recommendations || []
+  currentIndex.value = s.currentIndex ?? 0
+  correctCount.value = s.correctCount ?? 0
+  wrongCount.value = s.wrongCount ?? 0
+  skipCount.value = s.skipCount ?? 0
+  Object.assign(answerMap, s.answerMap || {})
+  Object.assign(selectedChoice, s.selectedChoice || {})
+  submittedSet.value = new Set(s.submittedSet || [])
+  advisorMode.value = s.advisorMode || ''
+  advisorInstruction.value = s.advisorInstruction || null
+  Object.assign(profileSnap, s.profileSnap || {})
+  limit.value = s.limit || 5
+  loading.value = false
+}
+
+// 是否有未完成的上次练习
+const hasSavedSession = ref(false)
+const savedProgress = computed(() => {
+  const s = loadSession()
+  return s ? s.correctCount + s.wrongCount + s.skipCount : 0
+})
+
 // 用户编辑画像弹窗
 const showEditProfile = ref(false)
+
+const _initWithSavedSession = () => {
+  const saved = loadSession()
+  if (saved) {
+    _applySavedState(saved)
+  }
+  hasSavedSession.value = false
+}
+
+const _startFresh = () => {
+  clearSession()
+  hasSavedSession.value = false
+  loadRecommendations()
+}
 
 onMounted(async () => {
   loadUserInfo()
   await checkRedis()
-  await loadRecommendations()
+
+  const saved = loadSession()
+  if (saved && !saved.isCompleted && saved.recommendations.length > 0) {
+    hasSavedSession.value = true
+    // pre-load the snapshot so sidebar shows proper data
+    Object.assign(profileSnap, saved.profileSnap || {})
+    advisorMode.value = saved.advisorMode || ''
+    advisorInstruction.value = saved.advisorInstruction || null
+    loading.value = false
+  } else {
+    await loadRecommendations()
+  }
+})
+
+onUnmounted(() => {
+  if (!allDone.value && recommendations.value.length > 0) {
+    saveSessionFromCurrentState()
+  }
 })
 </script>
 
@@ -709,6 +724,46 @@ onMounted(async () => {
 
 /* ====== 错误 ====== */
 .error-banner { background: #fff0f0; border: 1px solid #ffcdd2; color: #b71c1c; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; font-size: 14px; }
+
+/* ====== 继续练习横幅 ====== */
+.continue-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
+  border: 1.5px solid #90caf9;
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  color: #1a237e;
+  flex-wrap: wrap;
+}
+.continue-icon { font-size: 24px; }
+.continue-actions { display: flex; gap: 8px; margin-left: auto; }
+.btn-continue {
+  background: linear-gradient(135deg, #0071e3, #005bb5);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.btn-continue:hover { opacity: 0.88; }
+.btn-fresh {
+  background: #fff;
+  color: #555;
+  border: 1px solid #d0d7e2;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-fresh:hover { background: #f5f5f7; }
 
 /* ====== Advisor 模式 ====== */
 .advisor-mode-card { display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: 14px; margin-bottom: 20px; border: 1.5px solid transparent; }

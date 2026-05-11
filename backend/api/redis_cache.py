@@ -81,7 +81,7 @@ async def add_to_review_queue(
     对应需求40: 将错题加入Redis ZSet复习队列
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         success = service.add_to_review_queue(
@@ -124,7 +124,7 @@ async def get_due_reviews(
     对应需求40: 使用ZRANGEBYSCORE拉取已到期题目
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         due_items = service.get_due_reviews(user_id, limit)
@@ -152,7 +152,7 @@ async def update_review_stage(
     答对进入下一阶段，答错重置为阶段0
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         result = service.update_review_stage(
@@ -179,7 +179,7 @@ async def get_review_queue_stats(
 ):
     """获取复习队列统计"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         stats = service.get_review_queue_stats(user_id)
@@ -202,7 +202,7 @@ async def remove_from_review_queue(
 ):
     """从复习队列中移除题目"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         success = service.remove_from_review_queue(user_id, question_id)
@@ -234,7 +234,7 @@ async def cache_mastery(
     对应需求41: 将掌握度存入Redis Hash
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         success = service.cache_mastery(
@@ -271,7 +271,7 @@ async def get_mastery(
     对应需求41: 从Redis Hash获取掌握度
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         data = service.get_mastery(user_id, knowledge_point_id)
@@ -303,7 +303,7 @@ async def get_all_mastery(
 ):
     """获取用户所有知识点掌握度"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         all_mastery = service.get_all_mastery(user_id)
@@ -327,7 +327,7 @@ async def batch_cache_mastery(
 ):
     """批量缓存掌握度"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         success = service.batch_cache_mastery(user_id, request.mastery_data)
@@ -352,7 +352,7 @@ async def invalidate_mastery_cache(
 ):
     """使掌握度缓存失效"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         success = service.invalidate_mastery_cache(user_id)
@@ -384,7 +384,7 @@ async def warm_up_cache(
     用户登录时从MySQL加载数据到Redis
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         
@@ -400,7 +400,6 @@ async def warm_up_cache(
             else:
                 raise HTTPException(status_code=500, detail="预热失败")
         else:
-            # TODO: 从数据库加载
             return {
                 'success': False,
                 'message': '未提供数据，请从数据库加载后调用批量缓存接口',
@@ -420,7 +419,7 @@ async def get_cache_stats(
 ):
     """获取缓存统计信息"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = RedisCacheService()
         stats = service.get_cache_stats(user_id)
@@ -444,7 +443,7 @@ async def get_due_review_count(
 ):
     """获取到期复习题目数量（便捷接口）"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         from services.redis_cache_service import get_due_review_count
         count = get_due_review_count(user_id)
@@ -471,7 +470,7 @@ async def get_mastery_for_recommendation(
     用于推题引擎快速获取掌握度
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         from services.redis_cache_service import get_mastery_for_recommendation
         mastery = get_mastery_for_recommendation(user_id, knowledge_point_ids)

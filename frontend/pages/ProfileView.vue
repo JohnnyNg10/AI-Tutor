@@ -23,11 +23,8 @@
         <router-link to="/recommend" class="nav-item">
           <span class="nav-icon">✨</span><span>智能推荐</span>
         </router-link>
-        <router-link to="/exercises" class="nav-item">
-          <span class="nav-icon">📝</span><span>练习中心</span>
-        </router-link>
         <router-link to="/mistake-book" class="nav-item">
-          <span class="nav-icon">📕</span><span>错题本</span>
+          <span class="nav-icon">📝</span><span>练习中心</span>
         </router-link>
         <router-link to="/profile" class="nav-item active">
           <span class="nav-icon">📊</span><span>学习画像</span>
@@ -49,9 +46,16 @@
         </button>
       </div>
 
-      <p class="sub">用户ID：{{ userId || '-' }}</p>
       <p v-if="error" class="error">{{ error }}</p>
 
+      <!-- 骨架屏加载 -->
+      <template v-if="loading">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card short"></div>
+        <div class="skeleton-card short"></div>
+      </template>
+
+      <template v-else>
       <section class="card">
         <h2>能力曲线（最近记录）</h2>
         <div v-if="chartData.points.length === 0" class="empty">暂无能力曲线数据</div>
@@ -173,37 +177,38 @@
         </div>
       </section>
 
-      <section class="grid-two">
-        <div class="card">
-          <h2>A/B 统计（Control）</h2>
-          <div v-if="abStats.control" class="stats">
-            <div>记录数：{{ abStats.control.total_records }}</div>
-            <div>正确率：{{ pct(abStats.control.accuracy) }}</div>
-            <div>平均难度：{{ safeNum(abStats.control.avg_difficulty) }}</div>
-            <div>平均耗时：{{ safeNum(abStats.control.avg_time_spent) }}s</div>
-          </div>
-          <div v-else class="empty">暂无数据</div>
-        </div>
-
-        <div class="card">
-          <h2>A/B 统计（Treatment）</h2>
-          <div v-if="abStats.treatment" class="stats">
-            <div>记录数：{{ abStats.treatment.total_records }}</div>
-            <div>正确率：{{ pct(abStats.treatment.accuracy) }}</div>
-            <div>平均难度：{{ safeNum(abStats.treatment.avg_difficulty) }}</div>
-            <div>平均耗时：{{ safeNum(abStats.treatment.avg_time_spent) }}s</div>
-          </div>
-          <div v-else class="empty">暂无数据</div>
-        </div>
+      <!-- 六维能力雷达图 -->
+      <section class="six-dim-section">
+        <SixDimRadarChart :user-id="userId" />
       </section>
+
+      <!-- 知识树进度 -->
+      <section class="knowledge-tree-section">
+        <KnowledgeTree :user-id="userId" />
+      </section>
+
+      <!-- 学习徽章墙 -->
+      <section class="badge-section">
+        <LearningBadgeWall />
+      </section>
+
+      <!-- 雷区与攻克成就 -->
+      <section class="pitfall-section">
+        <PitfallAchievement />
+      </section>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import SixDimRadarChart from '../components/SixDimRadarChart.vue'
+import KnowledgeTree from '../components/KnowledgeTree.vue'
+import LearningBadgeWall from '../components/LearningBadgeWall.vue'
+import PitfallAchievement from '../components/PitfallAchievement.vue'
 import { useRouter } from 'vue-router'
-import { ensureCurrentUserId, exercisesAPI } from '../services/apiService'
+import { ensureCurrentUserId } from '../services/apiService'
 
 const router = useRouter()
 const isSidebarCollapsed = ref(false)
@@ -226,10 +231,7 @@ const dashboard = ref({
   mistake_distribution: {},
 })
 
-const abStats = ref({
-  control: null,
-  treatment: null,
-})
+
 
 const distributionList = computed(() => {
   const raw = dashboard.value?.mistake_distribution || {}
@@ -371,17 +373,50 @@ const loadAll = async () => {
       userInfo.value.avatar = info.avatar || '👤'
     }
 
-    const [dashboardRes, controlRes, treatmentRes] = await Promise.all([
-      exercisesAPI.getMasteryDashboard({ userId: userId.value, trendLimit: 30 }),
-      exercisesAPI.getAbTestStats({ algorithmVersion: 'control', limit: 1000 }),
-      exercisesAPI.getAbTestStats({ algorithmVersion: 'treatment', limit: 1000 }),
-    ])
+    const token = localStorage.getItem('access_token')
+    const headers = { 'Authorization': `Bearer ${token}` }
 
-    dashboard.value = dashboardRes?.data || dashboard.value
-    abStats.value = {
-      control: controlRes?.data || null,
-      treatment: treatmentRes?.data || null,
-    }
+    // 获取掌握度可视化数据
+    try {
+      const masteryRes = await fetch('/api/mastery/visualization', { headers }).then(r => r.json())
+      if (masteryRes.success && masteryRes.mastery_levels?.length) {
+        dashboard.value.radar_dimensions = masteryRes.mastery_levels.map(m => ({
+          knowledge_point: m.knowledge_point_name,
+          mastery: m.p_known,
+          color: m.p_known >= 0.8 ? 'green' : m.p_known >= 0.5 ? 'yellow' : 'red'
+        }))
+      }
+    } catch {}
+
+    // 获取画像数据（当前快照 + 历史曲线）
+    try {
+      const advisorRes = await fetch('/api/advisor/profile', { headers }).then(r => r.json())
+      if (advisorRes.success && advisorRes.data) {
+        const d = advisorRes.data
+        dashboard.value.ability_curve = [{
+          time: new Date().toISOString(),
+          theta: d.theta || 0,
+          theta_ci_lower: Math.max(0, (d.theta || 0) - 1.96 * (d.theta_se || 0.7)),
+          theta_ci_upper: (d.theta || 0) + 1.96 * (d.theta_se || 0.7)
+        }]
+        if (d.knowledge_mastery) {
+          dashboard.value.mistake_distribution = d.knowledge_mastery
+        }
+      }
+    } catch {}
+
+    // 获取能力历史曲线
+    try {
+      const histRes = await fetch('/api/six-dim-ability/history?days=30', { headers }).then(r => r.json())
+      if (histRes.success && histRes.history?.length) {
+        dashboard.value.ability_curve = histRes.history.map(h => ({
+          time: h.time || h.timestamp || h.created_at,
+          theta: h.theta ?? h.logical_reasoning ?? 0,
+          theta_ci_lower: Math.max(0, (h.theta || h.logical_reasoning || 0) - 1),
+          theta_ci_upper: (h.theta || h.logical_reasoning || 0) + 1
+        }))
+      }
+    } catch {}
   } catch (e) {
     error.value = e?.message || '加载学习画像失败'
   } finally {
@@ -504,6 +539,15 @@ onMounted(loadAll)
 .header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .sub { color: #666; margin-bottom: 12px; }
 .error { color: #d93025; margin-bottom: 12px; }
+
+/* ====== 骨架屏 ====== */
+.skeleton-card {
+  height: 140px; border-radius: 14px; margin-bottom: 16px;
+  background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+  background-size: 200% 100%; animation: shimmer 1.4s infinite;
+}
+.skeleton-card.short { height: 80px; }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 .refresh-btn { border: none; background: #1d4ed8; color: #fff; padding: 8px 14px; border-radius: 8px; cursor: pointer; }
 .refresh-btn:disabled { opacity: .65; cursor: not-allowed; }
 .card { background: #fff; border: 1px solid #e9edf2; border-radius: 14px; padding: 16px; margin-bottom: 16px; }
@@ -591,6 +635,27 @@ onMounted(loadAll)
 .bar { height: 100%; border-radius: 999px; }
 .bar.green { background: #16a34a; }
 .bar.yellow { background: #f59e0b; }
+
+/* 六维能力雷达图区域 */
+.six-dim-section {
+  margin-top: 24px;
+}
+
+.six-dim-section :deep(.six-dim-radar) {
+  margin: 0;
+}
+
+/* 知识树区域 */
+.knowledge-tree-section {
+  margin-top: 24px;
+}
+
+.knowledge-tree-section :deep(.knowledge-tree) {
+  margin: 0;
+}
+.badge-section, .pitfall-section {
+  margin-top: 24px;
+}
 .bar.red { background: #ef4444; }
 .value { text-align: right; font-size: 12px; color: #6b7280; }
 .distribution-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #eef1f5; font-size: 13px; }

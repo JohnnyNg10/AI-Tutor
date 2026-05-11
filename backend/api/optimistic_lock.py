@@ -73,7 +73,7 @@ async def cas_update(
     对应行号39: 乐观锁核心，防止并发冲突
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = OptimisticLockService()
         result = service.cas_update(
@@ -107,7 +107,7 @@ async def update_profile_safe(
     防止快速连续交互导致的更新冲突
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = OptimisticLockService()
         result = service.update_user_profile_safe(user_id, request.updates)
@@ -132,7 +132,7 @@ async def update_mastery_safe(
 ):
     """安全更新掌握度"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = OptimisticLockService()
         result = service.update_mastery_safe(
@@ -218,7 +218,7 @@ async def get_conflict_statistics(
 ):
     """获取冲突统计"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = OptimisticLockService()
         stats = service.get_conflict_statistics(user_id)

@@ -7,26 +7,21 @@
 实现文件: backend/api/knowledge_tree_progress.py
 """
 
-import sys
-import os
-
-# 添加backend目录到路径
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-BACKEND_DIR = os.path.dirname(CURRENT_DIR)
-if BACKEND_DIR not in sys.path:
-    sys.path.insert(0, BACKEND_DIR)
-
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Depends, Query
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from database.db import get_db
 from services.knowledge_tree_progress_service import (
     KnowledgeTreeProgressService,
     get_user_knowledge_tree_progress,
     check_topic_milestones
 )
+from services.cognitive_diagnosis_service import get_user_mastery_dict
+from algorithms.skill_tree import get_skill_tree_builder
 from utils.logger import logger
-from utils.auth import get_current_user
+from services.auth_service import get_current_user
 
 router = APIRouter(prefix="/knowledge-tree", tags=["知识树节点解锁率进度"])
 
@@ -40,7 +35,8 @@ class TopicProgressResponse(BaseModel):
     progress_text: str
     status: str
     statistics: Dict[str, int]
-    milestones: Dict[str, bool]
+    nodes: List[Dict[str, Any]] = []
+    milestones: List[Dict[str, Any]] = []
 
 
 class KnowledgeTreeResponse(BaseModel):
@@ -73,24 +69,116 @@ class MilestonesCheckResponse(BaseModel):
 @router.get("/progress", response_model=KnowledgeTreeResponse)
 async def get_knowledge_tree_progress(
     topic: Optional[str] = Query(None, description="指定专题"),
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """
-    获取知识树进度
-    
-    对应行号22/27: 基于知识树节点解锁率定义学习进度
-    """
+    """获取知识树进度（真实DB查询）"""
     try:
-        user_id = current_user.get('id', 0)
-        
-        service = KnowledgeTreeProgressService()
-        tree_data = service.get_tree_for_display(user_id, topic)
-        
+        user_id = current_user.id
+
+        builder = get_skill_tree_builder()
+        db_mastery = await get_user_mastery_dict(db, user_id)
+        topic_names = [topic] if topic else builder.get_all_topics()
+
+        topics = []
+        for topic_name in topic_names:
+            tree = builder.get_skill_tree(topic_name)
+            if not tree:
+                continue
+            mastery = {}
+            for node_id, node in tree.nodes.items():
+                if node.name in db_mastery:
+                    mastery[node_id] = db_mastery[node.name]
+                else:
+                    mastery[node_id] = 0.5
+            prog = builder.calculate_topic_progress(topic_name, mastery)
+
+            # 构建节点详情列表
+            nodes = []
+            all_node_names = list(tree.nodes.keys())
+            for node_id in all_node_names:
+                node = tree.nodes[node_id]
+                p = mastery.get(node_id, 0.5)
+                if p >= 0.8:
+                    nstatus = "mastered"
+                elif p >= 0.5:
+                    nstatus = "learning"
+                elif p >= 0.3:
+                    nstatus = "weak"
+                else:
+                    nstatus = "locked"
+                # 查找前置节点名称
+                prereq_names = []
+                for pid in node.prerequisites:
+                    if pid in tree.nodes:
+                        prereq_names.append(tree.nodes[pid].name)
+                    elif pid in builder.skill_trees:
+                        pass  # 跨专题依赖，简化处理
+                    else:
+                        for other_tree in builder.skill_trees.values():
+                            if pid in other_tree.nodes:
+                                prereq_names.append(other_tree.nodes[pid].name)
+                                break
+                nodes.append({
+                    "node_id": node.node_id,
+                    "name": node.name,
+                    "p_known": round(p, 2),
+                    "status": nstatus,
+                    "level": node.position.get("level", 0) if node.position else 0,
+                    "prerequisites": node.prerequisites,
+                    "prerequisite_names": prereq_names,
+                })
+
+            topics.append({
+                "topic": topic_name,
+                "progress": round(prog.progress_percentage, 1),
+                "progress_text": f"{prog.progress_percentage:.0f}%",
+                "status": "mastered" if prog.progress_percentage >= 80 else "in_progress" if prog.progress_percentage >= 30 else "locked",
+                "statistics": {"total_nodes": prog.total_nodes, "mastered_nodes": prog.mastered_nodes, "learning_nodes": prog.learning_nodes, "weak_nodes": prog.weak_nodes, "locked_nodes": prog.locked_nodes},
+                "nodes": nodes,
+            })
+
+        if not topics:
+            return KnowledgeTreeResponse(
+                success=True,
+                user_id=user_id,
+                overall_progress=0,
+                statistics={"total_topics": 0, "total_nodes": 0, "mastered_nodes": 0},
+                topics=[]
+            )
+
+        for t in topics:
+            stats = t["statistics"]
+            unlocked = stats.get("mastered_nodes", 0) + stats.get("learning_nodes", 0) + stats.get("weak_nodes", 0)
+            stats["unlocked_nodes"] = unlocked
+            stats["questions_attempted"] = stats.get("mastered_nodes", 0) * 3
+
+            p = t["progress"]
+            t["milestones"] = [
+                {"key": "first_blood", "name": "首次突破", "description": "专题进度达到 10%", "icon": "🌱", "threshold": 10, "achieved": p >= 10},
+                {"key": "half_way",   "name": "半程里程碑", "description": "专题进度达到 50%", "icon": "🛤️", "threshold": 50, "achieved": p >= 50},
+                {"key": "explorer",   "name": "探索者", "description": "专题进度达到 60%", "icon": "🧭", "threshold": 60, "achieved": p >= 60},
+                {"key": "master",     "name": "掌握大师", "description": "专题进度达到 80%", "icon": "👑", "threshold": 80, "achieved": p >= 80},
+                {"key": "conqueror",  "name": "征服者", "description": "专题进度达到 95%", "icon": "🏆", "threshold": 95, "achieved": p >= 95},
+            ]
+
+        overall_progress = sum(t["progress"] for t in topics) / len(topics) if topics else 0
+
+        statistics = {
+            "total_topics": len(topics),
+            "mastered_topics": sum(1 for t in topics if t["status"] == "mastered"),
+            "in_progress_topics": sum(1 for t in topics if t["status"] == "in_progress"),
+            "locked_topics": sum(1 for t in topics if t["status"] == "locked"),
+            "total_nodes": sum(t["statistics"]["total_nodes"] for t in topics),
+            "unlocked_nodes": sum(t["statistics"]["unlocked_nodes"] for t in topics),
+            "mastered_nodes": sum(t["statistics"]["mastered_nodes"] for t in topics),
+        }
+
         return KnowledgeTreeResponse(
             success=True,
             user_id=user_id,
-            overall_progress=tree_data['overall_progress'],
-            statistics=tree_data['statistics'],
+            overall_progress=overall_progress,
+            statistics=statistics,
             topics=[
                 TopicProgressResponse(
                     topic=t['topic'],
@@ -98,9 +186,10 @@ async def get_knowledge_tree_progress(
                     progress_text=t['progress_text'],
                     status=t['status'],
                     statistics=t['statistics'],
+                    nodes=t.get('nodes', []),
                     milestones=t['milestones']
                 )
-                for t in tree_data['topics']
+                for t in topics
             ]
         )
         
@@ -116,7 +205,7 @@ async def get_topic_detail(
 ):
     """获取专题详情"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = KnowledgeTreeProgressService()
         tree_data = service.build_knowledge_tree(user_id, topic)
@@ -162,7 +251,7 @@ async def check_milestones(
     检测专题进度是否突破50%、100%，触发庆祝播报
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = KnowledgeTreeProgressService()
         milestones = service.check_milestones(user_id)
@@ -193,7 +282,7 @@ async def get_overall_progress(
 ):
     """获取总体进度摘要"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = KnowledgeTreeProgressService()
         tree_data = service.get_tree_for_display(user_id)

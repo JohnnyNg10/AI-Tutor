@@ -9,7 +9,7 @@
         </div>
         <div class="user-info" v-show="!isSidebarCollapsed">
           <span class="user-name">{{ userInfo.name }}</span>
-          <span class="user-level">错题本</span>
+          <span class="user-level">练习中心</span>
         </div>
       </div>
 
@@ -24,11 +24,8 @@
         <router-link to="/recommend" class="nav-item">
           <span class="nav-icon">✨</span><span>智能推荐</span>
         </router-link>
-        <router-link to="/exercises" class="nav-item">
-          <span class="nav-icon">📝</span><span>练习中心</span>
-        </router-link>
         <router-link to="/mistake-book" class="nav-item active">
-          <span class="nav-icon">📕</span><span>错题本</span>
+          <span class="nav-icon">📝</span><span>练习中心</span>
         </router-link>
         <router-link to="/profile" class="nav-item">
           <span class="nav-icon">📊</span><span>学习画像</span>
@@ -46,7 +43,7 @@
     <main class="main-content">
       <div class="mobile-header">
         <button class="mobile-menu-btn" @click="toggleSidebar">☰</button>
-        <span class="mobile-title">📕 错题本</span>
+        <span class="mobile-title">练习中心</span>
       </div>
 
       <!-- ===== 复习模式遮罩 ===== -->
@@ -194,8 +191,8 @@
         <!-- 页头统计 -->
         <div class="page-header">
           <div class="header-left">
-            <h1>📕 错题本</h1>
-            <p>巩固薄弱知识点，让每道错题都变成进步的阶梯</p>
+            <h1>📝 练习中心</h1>
+            <p>错题复习 + 针对性练习，巩固薄弱知识点</p>
           </div>
           <div class="stats-row">
             <div class="stat-card">
@@ -329,11 +326,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, reactive } from 'vue'
+import { ref, computed, onMounted, onUnmounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import katex from 'katex'
-import 'katex/dist/katex.min.css'
 import { learningToolsAPI, advisorAPI, chatAPI } from '../services/apiService.js'
+import { renderMath, isChoice, parseChoices, typeLabel, diffLabel, diffClass, isImageAvatar } from '../composables/useQuestionUtils.js'
+import { useReviewSession } from '../composables/useRecommendSession.js'
+
+const { saveReview, loadReview, clearReview } = useReviewSession()
 
 const router = useRouter()
 const isSidebarCollapsed = ref(false)
@@ -379,77 +378,6 @@ const reviewProgress = computed(() =>
 const currentReviewQ = computed(() => reviewList.value[reviewIndex.value] ?? null)
 const isReviewLast = computed(() => reviewIndex.value >= reviewList.value.length - 1)
 
-// ---------------------------------------------------------------------------
-// KaTeX 渲染（与 RecommendView 保持一致）
-// ---------------------------------------------------------------------------
-const renderMath = (text) => {
-  if (!text) return ''
-  let content = String(text)
-  const mathBlocks = []
-
-  content = content
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_, f) => `$$${f}$$`)
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_, f) => `$${f}$`)
-
-  content = content.replace(/\$\$([\s\S]*?)\$\$/g, (_, formula) => {
-    try {
-      const html = katex.renderToString(formula.trim(), { throwOnError: false, displayMode: true })
-      const token = `@@MATH${mathBlocks.length}@@`
-      mathBlocks.push(html)
-      return token
-    } catch { return `<span class="latex-error">${formula}</span>` }
-  })
-
-  content = content.replace(/\$([^\n$]+?)\$/g, (_, formula) => {
-    try {
-      const html = katex.renderToString(formula.trim(), { throwOnError: false, displayMode: false })
-      const token = `@@MATH${mathBlocks.length}@@`
-      mathBlocks.push(html)
-      return token
-    } catch { return `<span class="latex-error">${formula}</span>` }
-  })
-
-  content = content
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>')
-  content = content.replace(/@@MATH(\d+)@@/g, (_, i) => mathBlocks[Number(i)] || '')
-  return content
-}
-
-// ---------------------------------------------------------------------------
-// 题型判断 & 选择题解析
-// ---------------------------------------------------------------------------
-const isChoice = (item) =>
-  ['single_choice', 'multiple_choice', 'choice'].includes(
-    (item.question_type || '').toLowerCase()
-  )
-
-const parseChoices = (content) => {
-  if (!content) return []
-  const splitReg = /(?:^|\n)\s*[（(]?A[）)．.\s]/
-  const splitIdx = content.search(splitReg)
-  const optionStr = splitIdx >= 0 ? content.slice(splitIdx) : content
-
-  const parts = optionStr.split(/\n?\s*[（(]?([B-D])[）)．.\s]/)
-  const opts = []
-
-  if (parts.length >= 3) {
-    const firstMatch = optionStr.match(/[（(]?A[）)．.\s]\s*(.+?)(?=\s*[（(]?B[）)．.\s]|$)/s)
-    if (firstMatch) opts.push({ key: 'A', text: firstMatch[1].trim() })
-    for (let i = 1; i + 1 < parts.length; i += 2) {
-      opts.push({ key: parts[i], text: parts[i + 1].trim() })
-    }
-  }
-
-  if (opts.length < 2) {
-    const lines = content.split('\n')
-    for (const line of lines) {
-      const m = line.trim().match(/^[（(]?([A-D])[）)．.\s]\s*(.+)/)
-      if (m) opts.push({ key: m[1], text: m[2].trim() })
-    }
-  }
-  return opts
-}
 
 // ---------------------------------------------------------------------------
 // 计算属性
@@ -497,23 +425,6 @@ const isDue = (item) => {
   return new Date(item.next_review_at) <= new Date()
 }
 
-const typeLabel = (t) => {
-  const map = { single_choice: '单选', multiple_choice: '多选', fill_blank: '填空', essay: '大题', choice: '选择' }
-  return map[t] || (t || '未知题型')
-}
-
-const diffLabel = (d) => {
-  const map = { 1: '简单', 2: '中等', 3: '困难' }
-  return map[d] || (d ? `难度${d}` : '未知')
-}
-
-const diffClass = (d) => {
-  if (d === 1) return 'diff-easy'
-  if (d === 2) return 'diff-medium'
-  if (d === 3) return 'diff-hard'
-  return ''
-}
-
 const formatDate = (isoStr) => {
   if (!isoStr) return '-'
   const d = new Date(isoStr)
@@ -524,8 +435,6 @@ const formatDate = (isoStr) => {
   if (diff < 7) return `${diff}天前`
   return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
 }
-
-const isImageAvatar = (av) => typeof av === 'string' && (av.startsWith('http') || av.startsWith('/'))
 
 // ---------------------------------------------------------------------------
 // 数据加载
@@ -623,6 +532,7 @@ const submitReviewChoice = async () => {
   }
 
   await _doFeedback(item, isCorrect)
+  _saveReviewState()
 }
 
 // ---------------------------------------------------------------------------
@@ -663,6 +573,7 @@ const submitReviewEssay = async () => {
     }
 
     await _doFeedback(item, isCorrect)
+    _saveReviewState()
   } catch (e) {
     alert(e?.message || 'AI批改失败，请重试')
   } finally {
@@ -729,12 +640,26 @@ const _doFeedback = async (item, isCorrect) => {
 // ---------------------------------------------------------------------------
 // 下一题 / 结束
 // ---------------------------------------------------------------------------
+const _saveReviewState = () => {
+  if (!reviewMode.value) return
+  saveReview({
+    reviewList: reviewList.value,
+    reviewIndex: reviewIndex.value,
+    reviewCorrectCount: reviewCorrectCount.value,
+    reviewWrongCount: reviewWrongCount.value,
+    reviewNewMastered: reviewNewMastered.value,
+    isReviewDone: reviewDone.value,
+  })
+}
+
 const goReviewNext = () => {
   if (isReviewLast.value) {
     reviewDone.value = true
+    clearReview()
   } else {
     reviewIndex.value++
     _resetCurrentAnswer()
+    _saveReviewState()
   }
 }
 
@@ -742,6 +667,7 @@ const exitReview = () => {
   reviewMode.value = false
   reviewDone.value = false
   _resetCurrentAnswer()
+  clearReview()
 }
 
 // ---------------------------------------------------------------------------
@@ -770,6 +696,22 @@ onMounted(async () => {
   }
 
   await Promise.all([loadStats(), loadMistakes(), loadDue()])
+
+  // 恢复上次的复习会话
+  const savedReview = loadReview()
+  if (savedReview && !savedReview.isReviewDone && savedReview.reviewList.length > 0) {
+    reviewList.value = savedReview.reviewList
+    reviewIndex.value = savedReview.reviewIndex
+    reviewCorrectCount.value = savedReview.reviewCorrectCount
+    reviewWrongCount.value = savedReview.reviewWrongCount
+    reviewNewMastered.value = savedReview.reviewNewMastered
+    reviewDone.value = false
+    reviewMode.value = true
+  }
+})
+
+onUnmounted(() => {
+  _saveReviewState()
 })
 </script>
 

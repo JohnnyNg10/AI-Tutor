@@ -13,6 +13,8 @@ from models.question import Question
 from models.user import User
 from services.auth_service import get_current_user
 from services.tutor_service import tutor_service
+from services.question_structuring_service import question_structuring_service
+from services.question_validation_service import question_validation_service
 from utils.config import settings
 from utils.logger import logger
 
@@ -78,18 +80,96 @@ async def ask_stream(
         db.add(chat_message)
         chat_session.total_messages = (chat_session.total_messages or 0) + 1
 
-        question_record = Question(
-            user_id=current_user.id,
-            content=question,
-            question_type="image" if image_path else "text",
-        )
-        db.add(question_record)
+        # 结构化题目（从图片或文字中提取纯净题目）
+        logger.info(f"开始题目结构化，输入: {question[:50]}...")
+        structured_question = None
+        image_ocr_failed = False
+        if image_path:
+            logger.info(f"用户上传图片: {image_path}")
+            structured_question = await question_structuring_service.structure_from_image(image_path)
+            if structured_question is None:
+                image_ocr_failed = True
+                logger.warning(f"图片OCR失败: {image_path}")
+                user_text = question.strip() if question and question.strip() else ""
+                if user_text:
+                    question = f"[用户上传了图片但系统暂不支持图片识别。用户附带的文字是：{user_text}] 请友好地请用户把题目完整打字发过来。"
+                else:
+                    question = "[用户上传了图片但系统暂不支持图片识别，且没有附带文字描述] 请友好地请用户把题目打字发过来。"
+            else:
+                content = structured_question.get("content", "")
+                knowledge = structured_question.get("knowledge_points", [])
+                logger.info(f"图片OCR成功，提取到题目: {content[:80]}... 知识点: {knowledge}")
+                if content:
+                    qtype = structured_question.get("question_type", "解答题")
+                    kp_str = "、".join(knowledge) if knowledge else "待判断"
+                    question = f"[从图片识别到的题目]\n{content}\n\n题目类型：{qtype}\n涉及知识点：{kp_str}"
+        else:
+            logger.info(f"从文字提取题目")
+            structured_question = await question_structuring_service.structure_from_text(question)
+        
+        # 审核题目内容（确保是真正的数学题目，而非提问词）
+        question_record = None
+        if structured_question and structured_question.get("content"):
+            content_to_validate = structured_question["content"]
+            logger.info(f"开始审核题目内容: {content_to_validate[:50]}...")
+            
+            validation_result = await question_validation_service.validate(
+                content=content_to_validate,
+                source="image" if image_path else "text",
+                original_input=question
+            )
+            
+            if validation_result.is_valid:
+                # 审核通过，保存题目
+                question_record = Question(
+                    user_id=current_user.id,
+                    content=validation_result.content or content_to_validate,
+                    question_type=validation_result.question_type or structured_question.get("question_type", "解答题"),
+                    difficulty=validation_result.difficulty or structured_question.get("difficulty", 0.5),
+                    knowledge_points=validation_result.knowledge_points or structured_question.get("knowledge_points", []),
+                    source="user_uploaded",  # 用户上传的题目
+                    is_active=True,  # 审核通过，标记为有效
+                )
+                db.add(question_record)
+                logger.info(f"题目审核通过并已保存: {question_record.content[:100]}...")
+            else:
+                # 审核不通过，不保存到题库
+                logger.warning(f"题目审核未通过，不保存到题库。原因: {validation_result.reason} | 内容: {content_to_validate[:100]}...")
+                question_record = None
+        else:
+            # 结构化失败，尝试直接审核原始输入
+            logger.info(f"题目结构化失败，尝试审核原始输入: {question[:50]}...")
+            validation_result = await question_validation_service.validate(
+                content=question,
+                source="text",
+                original_input=question
+            )
+            
+            if validation_result.is_valid:
+                question_record = Question(
+                    user_id=current_user.id,
+                    content=validation_result.content or question,
+                    question_type=validation_result.question_type or "text",
+                    difficulty=validation_result.difficulty or 0.5,
+                    knowledge_points=validation_result.knowledge_points or [],
+                    source="user_uploaded",  # 用户上传的题目
+                    is_active=True,  # 审核通过，标记为有效
+                )
+                db.add(question_record)
+                logger.info(f"原始输入审核通过并已保存: {question_record.content[:100]}...")
+            else:
+                logger.warning(f"原始输入审核未通过，不保存到题库。原因: {validation_result.reason}")
 
         await db.commit()
 
-        logger.info(
-            f"question saved, user_id={current_user.id}, message_id={chat_message.id}, question_id={question_record.id}"
-        )
+        if question_record:
+            logger.info(
+                f"question saved, user_id={current_user.id}, message_id={chat_message.id}, question_id={question_record.id}"
+            )
+        else:
+            logger.info(
+                f"question not saved (validation failed), user_id={current_user.id}, message_id={chat_message.id}"
+            )
 
         # 获取历史消息作为上下文
         history_stmt = (

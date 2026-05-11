@@ -120,7 +120,7 @@ async def add_favorite(
     对应行号13: 点击收藏时弹出轻量级表单，要求选择或输入顿悟标签
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = FavoriteInsightService()
         result = service.add_favorite_with_insight(
@@ -156,7 +156,7 @@ async def update_favorite(
 ):
     """更新收藏的顿悟标签"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = FavoriteInsightService()
         result = service.update_favorite_insight(
@@ -191,7 +191,7 @@ async def get_favorites(
     返回用户的收藏列表，包含顿悟标签信息
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = FavoriteInsightService()
         favorites = service.get_user_favorites(
@@ -224,7 +224,7 @@ async def get_highlighted_favorites(
     对应行号13: 在收藏夹列表中，顿悟标签内容高亮展示于题目下方
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = FavoriteInsightService()
         favorites = service.get_favorites_with_highlight(user_id, limit)
@@ -248,7 +248,7 @@ async def get_favorite_detail(
 ):
     """获取收藏详情"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = FavoriteInsightService()
         favorite = service.get_favorite(user_id, favorite_id)
@@ -275,7 +275,7 @@ async def delete_favorite(
 ):
     """删除收藏"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = FavoriteInsightService()
         success = service.delete_favorite(user_id, favorite_id)
@@ -300,7 +300,7 @@ async def get_tag_statistics(
 ):
     """获取标签统计"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = FavoriteInsightService()
         stats = service.get_tag_statistics(user_id)
@@ -325,7 +325,7 @@ async def search_favorites(
 ):
     """搜索收藏"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = FavoriteInsightService()
         results = service.search_favorites(

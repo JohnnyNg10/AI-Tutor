@@ -20,6 +20,8 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Depends, Query
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from database.db import get_db
 from services.error_classification_service import (
     ErrorClassificationService,
     get_wrong_questions_by_error_category,
@@ -97,32 +99,34 @@ async def get_error_categories(
 
 @router.get("/wrong-questions/by-category", response_model=WrongQuestionsViewResponse)
 async def get_wrong_questions_by_category(
+    db: AsyncSession = Depends(get_db),
     category_filter: Optional[str] = Query(None, description="分类筛选"),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """
-    按错误原因获取错题
-    
-    对应行号13: 错题本按错误原因聚类展示
-    """
+    """按错误原因获取错题（真实数据库查询）"""
     try:
-        user_id = current_user.get('id', 0)
-        
+        user_id = current_user.id
+
         service = ErrorClassificationService()
-        view = service.get_wrong_questions_by_view(
-            user_id=user_id,
-            view_type='error_category',
-            category_filter=category_filter
-        )
-        
+        data = await service.get_categories_async(db, user_id)
+
+        groups = {
+            cat_name: {
+                'category': cat_name,
+                'count': cat['count'],
+                'questions': cat['questions']
+            }
+            for cat_name, cat in data['categories'].items()
+        }
+
         return WrongQuestionsViewResponse(
             success=True,
             user_id=user_id,
-            view_type=view['view_type'],
-            title=view['title'],
-            groups=view['groups']
+            view_type='error_category',
+            title='按错误原因分类',
+            groups=groups
         )
-        
+
     except Exception as e:
         logger.error(f"获取错题分类失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -134,7 +138,7 @@ async def get_wrong_questions_by_chapter(
 ):
     """按章节获取错题"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = ErrorClassificationService()
         view = service.get_wrong_questions_by_view(user_id, 'chapter')
@@ -158,7 +162,7 @@ async def get_wrong_questions_by_time(
 ):
     """按时间获取错题"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = ErrorClassificationService()
         view = service.get_wrong_questions_by_view(user_id, 'time')
@@ -188,7 +192,7 @@ async def generate_rehabilitation_pack(
     对应行号13: 一键专项复健，连续推送3道同错因题目
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = ErrorClassificationService()
         pack = service.generate_rehabilitation_pack(
@@ -225,7 +229,7 @@ async def get_error_statistics(
 ):
     """获取错误统计"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = ErrorClassificationService()
         stats = service.get_error_statistics(user_id)

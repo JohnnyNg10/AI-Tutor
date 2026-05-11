@@ -115,7 +115,7 @@ async def generate_hint(
     L4: 给出包含所有中间推导的完整解答
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"生成提示: 用户={user_id}, 等级=L{request.hint_level}")
         
         service = LLMService()
@@ -158,7 +158,7 @@ async def generate_emotional_response(
     生成相应的情感支持和教学提示
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"生成情感响应: 用户={user_id}, 情感={request.sentiment}")
         
         service = LLMService()
@@ -205,7 +205,7 @@ async def generate_recommendation_reason(
     - 字数严格控制在30字以内
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"生成推荐理由: 用户={user_id}")
         
         service = LLMService()

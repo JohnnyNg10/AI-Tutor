@@ -42,37 +42,41 @@ class ReviewItem:
 class RedisService:
     """
     Redis核心数据服务
-    
+
     严格遵循PRD文档第四章硬指标实现
+    当Redis不可用时，所有方法返回安全的默认值，服务降级运行
     """
-    
-    # 复习间隔配置（硬指标 - Spaced Repetition）
-    REVIEW_INTERVALS = [1, 2, 4, 7, 14]  # 天数
-    MAX_REVIEW_INTERVAL = 14  # 上限14天
-    
-    # TTL配置（硬指标）
-    TTL_REVIEW_QUEUE = 30 * 24 * 60 * 60  # 30天
-    TTL_MASTERY = 7 * 24 * 60 * 60        # 7天
-    
+
+    REVIEW_INTERVALS = [1, 2, 4, 7, 14]
+    MAX_REVIEW_INTERVAL = 14
+    TTL_REVIEW_QUEUE = 30 * 24 * 60 * 60
+    TTL_MASTERY = 7 * 24 * 60 * 60
+
     def __init__(self, host='localhost', port=6379, db=0, password=None):
-        """初始化Redis连接"""
-        self.redis_client = redis.Redis(
-            host=host,
-            port=port,
-            db=db,
-            password=password,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5
-        )
-        self._check_connection()
-    
-    def _check_connection(self):
-        """检查Redis连接"""
+        self.redis_client = None
+        self._available = False
         try:
+            self.redis_client = redis.Redis(
+                host=host, port=port, db=db, password=password,
+                decode_responses=True,
+                socket_connect_timeout=2, socket_timeout=2
+            )
             self.redis_client.ping()
-        except redis.ConnectionError as e:
-            raise ConnectionError(f"无法连接到Redis服务器: {e}")
+            self._available = True
+        except Exception:
+            self.redis_client = None
+            self._available = False
+
+    def is_available(self):
+        return self._available
+
+    def _safe_call(self, func, default, *args, **kwargs):
+        if not self._available or self.redis_client is None:
+            return default
+        try:
+            return func(*args, **kwargs)
+        except Exception:
+            return default
     
     # ==================== Seen Pool 已做题目去重池 ====================
     
@@ -344,6 +348,11 @@ class RedisService:
         score = self.redis_client.hget(key, knowledge_point_id)
         return int(score) if score else None
     
+    def get_all_mastery_scores(self, user_id: int) -> Dict[str, float]:
+        """别名：获取所有掌握度分数（0-1浮点）"""
+        raw = self.get_all_masteries(user_id)
+        return {k: v / 100.0 for k, v in raw.items()}
+
     def get_all_masteries(self, user_id: int) -> Dict[str, int]:
         """获取所有知识点掌握度"""
         key = KEY_PREFIX_MASTERY.format(uid=user_id)

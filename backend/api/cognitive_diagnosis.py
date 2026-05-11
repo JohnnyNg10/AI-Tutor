@@ -13,7 +13,8 @@ from services.cognitive_diagnosis_service import (
     cognitive_service,
     update_mastery_after_answer,
     get_user_theta,
-    compute_actual_score
+    compute_actual_score,
+    get_user_mastery_dict,
 )
 
 router = APIRouter(prefix="/cognitive", tags=["cognitive-diagnosis"])
@@ -433,11 +434,43 @@ async def api_reset_streak(user_id: int):
 
 # ============ 需求10 API端点 ============
 
+async def _get_user_mastery_for_skill_tree(db: AsyncSession, user_id: int) -> dict:
+    """
+    从数据库获取用户掌握度，转换为技能树可用格式 {node_id: p_known}
+    通过节点名称匹配 DB 中的知识点名称
+    """
+    from algorithms.skill_tree import get_skill_tree_builder
+    builder = get_skill_tree_builder()
+
+    # 查询用户掌握度
+    db_mastery = await get_user_mastery_dict(db, user_id)
+
+    # 构建 node_id → p_known 映射
+    mastery = {}
+    for topic, tree in builder.skill_trees.items():
+        for node_id, node in tree.nodes.items():
+            # 按节点名称精确匹配
+            if node.name in db_mastery:
+                mastery[node_id] = db_mastery[node.name]
+            else:
+                # 模糊匹配：检查 DB key 是否包含节点名
+                matched = False
+                for db_name, p in db_mastery.items():
+                    if node.name in db_name or db_name in node.name:
+                        mastery[node_id] = p
+                        matched = True
+                        break
+                if not matched:
+                    mastery[node_id] = 0.5  # 默认值
+
+    return mastery
+
+
 @router.post("/skill-tree", response_model=SkillTreeResponse)
-async def api_get_skill_tree(request: SkillTreeRequest):
+async def api_get_skill_tree(request: SkillTreeRequest, db: AsyncSession = Depends(get_db)):
     """
     获取用户的技能树（需求10）
-    
+
     返回带状态的知识点技能树，包含：
     - 绿色：已掌握 (P(L) >= 0.8)
     - 黄色：学习中 (0.5 <= P(L) < 0.8)
@@ -447,20 +480,10 @@ async def api_get_skill_tree(request: SkillTreeRequest):
     try:
         from algorithms.skill_tree import get_skill_tree_builder
         builder = get_skill_tree_builder()
-        
-        # TODO: 从数据库获取用户实际掌握度
-        # 这里使用Mock数据演示
-        mock_mastery = {
-            "arith_001": 0.9,
-            "arith_002": 0.85,
-            "arith_003": 0.6,
-            "arith_004": 0.3,
-            "arith_005": 0.4,
-            "arith_006": 0.0,
-        }
-        
-        user_tree = builder.build_user_skill_tree(request.topic, mock_mastery)
-        
+
+        mastery = await _get_user_mastery_for_skill_tree(db, request.user_id)
+        user_tree = builder.build_user_skill_tree(request.topic, mastery)
+
         return SkillTreeResponse(
             topic=user_tree.topic,
             nodes={k: v.to_dict() for k, v in user_tree.nodes.items()},
@@ -472,38 +495,29 @@ async def api_get_skill_tree(request: SkillTreeRequest):
 
 
 @router.post("/skill-tree/progress", response_model=TopicProgressResponse)
-async def api_get_topic_progress(request: SkillTreeRequest):
+async def api_get_topic_progress(request: SkillTreeRequest, db: AsyncSession = Depends(get_db)):
     """
     获取专题进度（需求10）
-    
+
     PRD公式：进度百分比 = (P(L) >= 0.8 的知识点数量) / (该专题总知识点数量)
     """
     try:
         from algorithms.skill_tree import get_skill_tree_builder
         builder = get_skill_tree_builder()
-        
-        # TODO: 从数据库获取用户实际掌握度
-        mock_mastery = {
-            "arith_001": 0.9,
-            "arith_002": 0.85,
-            "arith_003": 0.6,
-            "arith_004": 0.3,
-            "arith_005": 0.4,
-            "arith_006": 0.0,
-        }
-        
-        progress = builder.calculate_topic_progress(request.topic, mock_mastery)
-        
+
+        mastery = await _get_user_mastery_for_skill_tree(db, request.user_id)
+        progress = builder.calculate_topic_progress(request.topic, mastery)
+
         return TopicProgressResponse(**progress.to_dict())
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取专题进度失败: {str(e)}")
 
 
 @router.post("/skill-tree/recommendations")
-async def api_get_training_recommendations(request: SkillTreeRequest, limit: int = 3):
+async def api_get_training_recommendations(request: SkillTreeRequest, db: AsyncSession = Depends(get_db), limit: int = 3):
     """
     获取推荐训练节点（一键特训）（需求10）
-    
+
     推荐策略：
     1. 优先推荐薄弱点（红色）
     2. 其次推荐学习中（黄色）
@@ -512,23 +526,10 @@ async def api_get_training_recommendations(request: SkillTreeRequest, limit: int
     try:
         from algorithms.skill_tree import get_skill_tree_builder
         builder = get_skill_tree_builder()
-        
-        # TODO: 从数据库获取用户实际掌握度
-        mock_mastery = {
-            "arith_001": 0.9,
-            "arith_002": 0.85,
-            "arith_003": 0.6,
-            "arith_004": 0.3,
-            "arith_005": 0.4,
-            "arith_006": 0.0,
-        }
-        
-        recommendations = builder.get_recommended_training(
-            request.topic, 
-            mock_mastery, 
-            limit=limit
-        )
-        
+
+        mastery = await _get_user_mastery_for_skill_tree(db, request.user_id)
+        recommendations = builder.get_recommended_training(request.topic, mastery, limit=limit)
+
         return TrainingRecommendationResponse(
             topic=request.topic,
             recommendations=recommendations,
@@ -661,7 +662,7 @@ class DailyPackResponse(BaseModel):
 
 
 @router.post("/daily-pack", response_model=DailyPackResponse)
-async def api_get_daily_pack(request: DailyPackRequest):
+async def api_get_daily_pack(request: DailyPackRequest, db: AsyncSession = Depends(get_db)):
     """
     获取每日5题特训包（需求20）
     
@@ -676,17 +677,12 @@ async def api_get_daily_pack(request: DailyPackRequest):
         from algorithms.daily_training_pack import get_daily_pack_generator
         generator = get_daily_pack_generator()
         
-        # TODO: 从数据库获取用户实际数据
-        # Mock数据
-        user_theta = 0.5
-        user_mastery = {
-            "等差数列定义": 0.9,
-            "等差数列通项": 0.85,
-            "等差数列求和": 0.3,  # 薄弱
-            "等比数列定义": 0.4,  # 薄弱
-            "递推数列": 0.6,
-        }
-        review_queue = ["q001"]  # Mock复习队列
+        # 从数据库获取用户实际数据
+        theta_info = await get_user_theta(db, request.user_id)
+        user_theta = theta_info.get('theta', 0.5)
+        db_mastery = await get_user_mastery_dict(db, request.user_id)
+        user_mastery = db_mastery if db_mastery else {"默认": 0.5}
+        review_queue = []
         
         pack = generator.generate_pack(
             user_id=request.user_id,
@@ -712,22 +708,18 @@ class CronJobResponse(BaseModel):
 
 
 @router.post("/cron/memory-decay", response_model=CronJobResponse)
-async def api_execute_memory_decay_cron():
+async def api_execute_memory_decay_cron(db: AsyncSession = Depends(get_db)):
     """
     执行记忆衰减定时任务（需求29）
-    
+
     执行频率：每日凌晨 02:00
     衰减公式：P(L_t) = P(L_{t-1}) × e^(-λΔt)
     缓存同步：更新MySQL后同步Redis
-    
-    注意：实际生产环境应由Cron调度器调用，此API用于手动触发测试
     """
     try:
-        from algorithms.memory_decay_cron import get_memory_decay_cron
-        cron = get_memory_decay_cron()
-        
-        result = cron.execute_cron_job()
-        
+        from algorithms.memory_decay_cron import MemoryDecayCronJob
+        cron = MemoryDecayCronJob()
+        result = await cron.execute_cron_job_real(db)
         return CronJobResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"执行记忆衰减任务失败: {str(e)}")

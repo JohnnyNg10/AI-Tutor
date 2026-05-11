@@ -23,6 +23,8 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from services.redis_service import RedisService
 from services.redis_cache_service import RedisCacheService
 from utils.logger import logger
@@ -341,28 +343,111 @@ class PitfallAchievementService:
         except Exception as e:
             logger.error(f"缓存双列数据失败: {e}")
     
-    # ==================== 数据获取（模拟） ====================
-    
-    def _get_user_error_records(self, user_id: int) -> List[Dict]:
-        """获取用户错误记录"""
-        # TODO: 从数据库查询
-        # 临时返回模拟数据
+    # ==================== 数据获取 ====================
+
+    async def _get_user_error_records(self, db: AsyncSession, user_id: int) -> List[Dict]:
+        """从 learning_records 查询用户最近错误记录"""
+        from sqlalchemy import select, desc
+        from models.record import LearningRecord
+        stmt = (
+            select(LearningRecord)
+            .where(LearningRecord.user_id == user_id)
+            .where(LearningRecord.is_correct == False)
+            .order_by(desc(LearningRecord.created_at))
+            .limit(50)
+        )
+        result = await db.execute(stmt)
+        records = result.scalars().all()
         return [
-            {'error_type': 'calculation', 'question_id': 'q001', 'timestamp': datetime.now().isoformat()},
-            {'error_type': 'calculation', 'question_id': 'q002', 'timestamp': datetime.now().isoformat()},
-            {'error_type': 'formula', 'question_id': 'q003', 'timestamp': datetime.now().isoformat()},
-            {'error_type': 'concept', 'question_id': 'q004', 'timestamp': datetime.now().isoformat()},
+            {
+                'question_id': r.question_id,
+                'timestamp': r.created_at.isoformat() if r.created_at else '',
+                'skip_reason': r.skip_reason,
+                'hint_count': r.hint_count,
+            }
+            for r in records
         ]
-    
-    def _get_completed_reviews(self, user_id: int) -> List[Dict]:
-        """获取已完成的复习"""
-        # TODO: 从数据库查询
-        return []
-    
-    def _get_improved_knowledge(self, user_id: int) -> List[Dict]:
-        """获取掌握度提升的知识点"""
-        # TODO: 从数据库查询
-        return []
+
+    async def _get_completed_reviews(self, db: AsyncSession, user_id: int) -> List[Dict]:
+        """从 mistake_book 查询已攻克的错题"""
+        from sqlalchemy import select
+        from models.learning_analytics import MistakeBook
+        stmt = (
+            select(MistakeBook)
+            .where(MistakeBook.user_id == user_id)
+            .where(MistakeBook.mastered == True)
+            .limit(30)
+        )
+        result = await db.execute(stmt)
+        records = result.scalars().all()
+        return [
+            {
+                'question_id': r.question_id,
+                'error_count': r.error_count,
+                'mastered_at': r.mastered_at.isoformat() if r.mastered_at else '',
+            }
+            for r in records
+        ]
+
+    async def _get_improved_knowledge(self, db: AsyncSession, user_id: int) -> List[Dict]:
+        """从 user_knowledge_mastery 查询掌握度已达标 (>=0.8) 的知识点"""
+        from sqlalchemy import select
+        from models.chat import UserKnowledgeMastery
+        stmt = (
+            select(UserKnowledgeMastery)
+            .where(UserKnowledgeMastery.user_id == user_id)
+            .where(UserKnowledgeMastery.p_known >= 0.8)
+        )
+        result = await db.execute(stmt)
+        records = result.unique().scalars().all()
+        return [
+            {
+                'kp_id': r.knowledge_point_id,
+                'kp_name': r.knowledge_point.name if r.knowledge_point else str(r.knowledge_point_id),
+                'p_known': r.p_known,
+            }
+            for r in records
+        ]
+
+    async def get_dual_column_async(self, db: AsyncSession, user_id: int) -> Dict[str, Any]:
+        """异步版双列数据获取（使用真实 DB 查询）"""
+        errors = await self._get_user_error_records(db, user_id)
+        improved = await self._get_improved_knowledge(db, user_id)
+        reviews = await self._get_completed_reviews(db, user_id)
+
+        # 构建雷区卡片
+        pitfalls = []
+        error_counts: Dict[str, int] = {}
+        for e in errors:
+            kind = e.get('skip_reason') or '未分类'
+            error_counts[kind] = error_counts.get(kind, 0) + 1
+
+        for kind, count in sorted(error_counts.items(), key=lambda x: -x[1]):
+            pitfalls.append({
+                'id': f'pitfall_{kind}',
+                'title': kind,
+                'frequency': count,
+                'suggestion': '建议针对性练习',
+            })
+
+        # 构建成就卡片
+        achievements = [
+            {
+                'id': f'ach_{kp["kp_id"]}',
+                'title': f'已掌握: {kp["kp_name"]}',
+                'p_known': kp['p_known'],
+            }
+            for kp in improved[:5]
+        ]
+
+        return {
+            'user_id': user_id,
+            'pitfalls': pitfalls,
+            'achievements': achievements,
+            'reviewed_count': len(reviews),
+            'pitfall_count': len(pitfalls),
+            'achievement_count': len(achievements),
+        }
     
     # ==================== API数据格式 ====================
     

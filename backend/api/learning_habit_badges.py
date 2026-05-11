@@ -81,7 +81,7 @@ async def track_behavior(
     记录用户的学习行为用于徽章检测
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = LearningHabitBadgeService()
         service.track_behavior(user_id, request.behavior_data)
@@ -107,7 +107,7 @@ async def check_new_badges(
     根据用户行为检测是否满足徽章条件
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = LearningHabitBadgeService()
         new_badges = service.detect_and_award_badges(user_id)
@@ -146,7 +146,7 @@ async def get_my_badges(
     返回已获得和进行中的徽章
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = LearningHabitBadgeService()
         badges = service.get_user_badges(user_id)
@@ -201,7 +201,7 @@ async def get_badges_summary(
 ):
     """获取徽章摘要"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = LearningHabitBadgeService()
         badges = service.get_user_badges(user_id)

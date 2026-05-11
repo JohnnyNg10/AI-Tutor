@@ -94,7 +94,7 @@ async def mark_seen(
     对应行号41: 将已做题目存入Redis Set
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SeenQuestionsService()
         success = service.mark_question_as_seen(user_id, request.question_id)
@@ -121,7 +121,7 @@ async def mark_seen_batch(
 ):
     """批量标记题目为已做"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SeenQuestionsService()
         success = service.mark_questions_as_seen(user_id, question_ids)
@@ -152,7 +152,7 @@ async def check_seen(
     对应行号41: 推题前检查是否已做过
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SeenQuestionsService()
         is_seen = service.is_question_seen(user_id, question_id)
@@ -180,7 +180,7 @@ async def filter_unseen(
     从候选题目中过滤掉已做过的题目
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SeenQuestionsService()
         unseen_ids = service.filter_seen_questions(user_id, request.question_ids)
@@ -206,7 +206,7 @@ async def get_seen_list(
 ):
     """获取已做题目列表"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SeenQuestionsService()
         seen = service.get_seen_questions(user_id, limit)
@@ -230,7 +230,7 @@ async def get_recent_seen(
 ):
     """获取最近做过的题目"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SeenQuestionsService()
         recent = service.get_recent_seen_questions(user_id, count)
@@ -253,7 +253,7 @@ async def get_statistics(
 ):
     """获取已做题目统计"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SeenQuestionsService()
         stats = service.get_seen_statistics(user_id)
@@ -280,7 +280,7 @@ async def clear_old_records(
 ):
     """清除旧的已做记录"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = SeenQuestionsService()
         cleared_count = service.clear_old_seen_questions(user_id, days)

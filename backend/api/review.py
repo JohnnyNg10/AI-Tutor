@@ -22,6 +22,8 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Depends, Query
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from database.db import get_db
 from services.review_queue_service import ReviewQueueService, get_due_review_questions
 from utils.logger import logger
 from utils.auth import get_current_user
@@ -95,26 +97,41 @@ class VariationQuestionResponse(BaseModel):
 
 @router.get("/due", response_model=ReviewListResponse)
 async def get_due_reviews(
+    db: AsyncSession = Depends(get_db),
     limit: int = Query(10, ge=1, le=50, description="返回数量"),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """
-    获取已到期的复习题目
-    
-    返回包含变式题的复习列表，支持游戏化视觉表现
-    """
+    """获取已到期的复习题目"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"获取到期复习题: 用户={user_id}, 限制={limit}")
-        
-        questions = get_due_review_questions(user_id, limit)
-        
+
+        service = ReviewQueueService()
+
+        # 从 Redis 复习队列获取到期题目
+        due_ids = service.get_due_review_ids(user_id, limit)
+
+        questions = []
+        for qid in due_ids:
+            info = await service._get_question_info(db, qid)
+            stage = service.get_review_stage(user_id, qid)
+            questions.append({
+                'question_id': qid,
+                'original_question': info,
+                'variation_question': None,
+                'review_stage': stage,
+                'visual_status': 'reviewing',
+                'color': '#FF9800',
+                'icon': '📝',
+                'is_mastered': stage >= 5,
+            })
+
         return ReviewListResponse(
             success=True,
             total=len(questions),
             questions=[ReviewQuestionResponse(**q) for q in questions]
         )
-        
+
     except Exception as e:
         logger.error(f"获取到期复习题失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -131,7 +148,7 @@ async def update_review_status(
     根据答题结果推进到下一阶段或标记为Mastered
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"更新复习状态: 用户={user_id}, 题目={request.question_id}, 正确={request.is_correct}")
         
         service = ReviewQueueService()
@@ -163,7 +180,7 @@ async def get_review_progress(
     返回错题复习的整体进度和治愈情况
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"获取复习进度: 用户={user_id}")
         
         service = ReviewQueueService()
@@ -194,7 +211,7 @@ async def add_to_review_queue(
     初始状态为"生锈"（红色），1天后首次复习
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"加入复习队列: 用户={user_id}, 题目={request.question_id}")
         
         service = ReviewQueueService()
@@ -233,7 +250,7 @@ async def get_variation_question(
     对应需求12: 基于RAG抽取同知识点、难度匹配的变式题
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"获取变式题: 用户={user_id}, 原题={question_id}")
         
         service = ReviewQueueService()
@@ -309,7 +326,7 @@ async def get_mastered_questions(
     获取已攻克的题目列表
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         # 从Redis获取已攻克集合
         mastered_key = f"ai:tutor:mastered:{user_id}"

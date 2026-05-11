@@ -89,7 +89,7 @@ async def handle_skip(
     根据跳过原因（太简单/太难了）进行相应的算法处理和Advisor介入
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"跳过题目：用户={user_id}, 题目={request.question_id}, 原因={request.skip_reason}")
         
         # 验证跳过原因
@@ -140,7 +140,7 @@ async def skip_too_easy(
     - BKT掌握度提升
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"太简单跳过：用户={user_id}, 题目={request.question_id}")
         
         handler = SkipHandler()
@@ -183,7 +183,7 @@ async def skip_too_hard(
     - U（不确定性）增加
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"太难了跳过：用户={user_id}, 题目={request.question_id}")
         
         handler = SkipHandler()
@@ -222,7 +222,7 @@ async def get_skip_statistics(
     统计用户的跳过历史，用于分析学习模式
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"获取跳过统计：用户={user_id}")
         
         handler = SkipHandler()
@@ -254,7 +254,7 @@ async def get_skip_history(
     获取用户最近的跳过记录
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"获取跳过历史：用户={user_id}, 限制={limit}")
         
         handler = SkipHandler()
@@ -290,7 +290,7 @@ async def get_calibration_suggestion(
     根据跳过历史，建议调整推荐算法参数
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"获取校准建议：用户={user_id}")
         
         handler = SkipHandler()
@@ -319,7 +319,7 @@ async def detect_skip_pattern(
     识别学生是否频繁跳过某类题目
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"检测跳过模式：用户={user_id}")
         
         handler = SkipHandler()

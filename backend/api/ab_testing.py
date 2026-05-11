@@ -20,6 +20,8 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Depends, Query
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from database.db import get_db
 from services.ab_testing_service import (
     ABTestingService,
     ExperimentGroup,
@@ -84,20 +86,27 @@ class GroupStatisticsResponse(BaseModel):
 
 @router.get("/group", response_model=UserGroupResponse)
 async def get_user_group(
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """
-    获取用户实验组
-    
-    返回用户所属的A/B测试分组及对应的推荐策略
-    """
+    """获取用户实验组（A/B测试分组）"""
     try:
-        user_id = current_user.get('id', 0)
-        
+        user_id = current_user.id
+
         service = ABTestingService()
         group = service.get_or_assign_group(user_id)
+
+        # Redis 未命中时从 MySQL 回退
+        if group is None:
+            db_group = await service.get_user_group_from_db(db, user_id)
+            if db_group:
+                group = ExperimentGroup(db_group)
+            else:
+                group = service.assign_user_to_group(user_id)
+                await service.sync_group_to_db(db, user_id, group.value)
+
         strategy = service.get_recommendation_strategy(user_id)
-        
+
         return UserGroupResponse(
             success=True,
             user_id=user_id,
@@ -105,7 +114,7 @@ async def get_user_group(
             strategy=strategy['strategy'],
             features=strategy['features']
         )
-        
+
     except Exception as e:
         logger.error(f"获取用户实验组失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -122,7 +131,7 @@ async def get_strategy(
     B组: V3 K-IRT + Soft Labeling
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = ABTestingService()
         strategy = service.get_recommendation_strategy(user_id)
@@ -149,7 +158,7 @@ async def record_event(
     用于跟踪正确率、答题时长等指标
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = ABTestingService()
         success = service.record_answer_event(
@@ -179,7 +188,7 @@ async def get_user_metrics(
 ):
     """获取用户指标"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         service = ABTestingService()
         metrics = service.get_user_metrics(user_id)
@@ -266,8 +275,6 @@ async def reset_experiment(
     清除所有A/B测试数据
     """
     try:
-        # TODO: 添加管理员权限检查
-        
         service = ABTestingService()
         success = service.reset_experiment()
         
@@ -292,7 +299,7 @@ async def check_is_v3(
 ):
     """检查当前用户是否使用V3特性"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         is_v3 = is_v3_user(user_id)
         
         return {

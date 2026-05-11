@@ -16,7 +16,9 @@ if BACKEND_DIR not in sys.path:
 
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, HTTPException, Depends
+from database.db import get_db
 
 from algorithms.rag_candidate_pool import (
     RAGCandidatePoolBuilder,
@@ -106,7 +108,7 @@ async def build_candidate_pool(
     3. 精排层：相似度加权 0.6×kp_relevance + 0.3×difficulty_match + 0.1×context_similarity
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"构建候选池请求：用户={user_id}, 薄弱知识点={request.weak_kps}, θ={request.theta}")
         
         builder = RAGCandidatePoolBuilder()
@@ -135,6 +137,7 @@ async def build_candidate_pool(
 @router.post("/questions", response_model=QuestionRecommendResponse)
 async def recommend_questions(
     request: QuestionRecommendRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
@@ -147,11 +150,12 @@ async def recommend_questions(
     4. 推荐理由生成（LLM适配层）
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"推荐题目请求：用户={user_id}, θ={request.theta}, 数量={request.count}")
         
         engine = QuestionRecommendationEngine()
-        recommendations = engine.recommend_questions(
+        recommendations = await engine.recommend_questions_async(
+            db=db,
             user_id=user_id,
             weak_kps=request.weak_kps,
             theta=request.theta,

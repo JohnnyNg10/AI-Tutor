@@ -111,106 +111,99 @@ class SkillTreeBuilder:
         self._init_default_trees()
     
     def _init_default_trees(self):
-        """初始化默认技能树（数列专题）"""
-        # 等差数列专题
-        arithmetic_tree = SkillTree(topic="等差数列")
-        arithmetic_nodes = [
-            # 根节点
-            KnowledgeNode(
-                node_id="arith_001",
-                name="数列基础概念",
-                topic="等差数列",
-                prerequisites=[],
-                is_root=True,
-                position={"x": 400, "y": 50, "level": 0}
-            ),
-            # 第二层
-            KnowledgeNode(
-                node_id="arith_002",
-                name="等差数列定义",
-                topic="等差数列",
-                prerequisites=["arith_001"],
-                position={"x": 200, "y": 150, "level": 1}
-            ),
-            KnowledgeNode(
-                node_id="arith_003",
-                name="等差数列通项公式",
-                topic="等差数列",
-                prerequisites=["arith_002"],
-                position={"x": 200, "y": 250, "level": 2}
-            ),
-            KnowledgeNode(
-                node_id="arith_004",
-                name="等差数列求和公式",
-                topic="等差数列",
-                prerequisites=["arith_003"],
-                position={"x": 200, "y": 350, "level": 3}
-            ),
-            # 第三层 - 应用
-            KnowledgeNode(
-                node_id="arith_005",
-                name="等差数列性质",
-                topic="等差数列",
-                prerequisites=["arith_003"],
-                position={"x": 400, "y": 250, "level": 2}
-            ),
-            KnowledgeNode(
-                node_id="arith_006",
-                name="等差数列综合应用",
-                topic="等差数列",
-                prerequisites=["arith_004", "arith_005"],
-                position={"x": 300, "y": 450, "level": 4}
-            ),
+        """初始化默认技能树（数列专题全覆盖）"""
+        # ===== 1. 数列基础（公共根） =====
+        base_tree = SkillTree(topic="数列基础")
+        base_nodes = [
+            KnowledgeNode(node_id="base_001", name="数列的概念与分类", topic="数列基础", prerequisites=[], is_root=True, position={"x": 400, "y": 50, "level": 0}),
+            KnowledgeNode(node_id="base_002", name="数列的通项", topic="数列基础", prerequisites=["base_001"], position={"x": 200, "y": 150, "level": 1}),
+            KnowledgeNode(node_id="base_003", name="数列的前n项和", topic="数列基础", prerequisites=["base_001"], position={"x": 600, "y": 150, "level": 1}),
+            KnowledgeNode(node_id="base_004", name="数列的递推关系", topic="数列基础", prerequisites=["base_002"], position={"x": 300, "y": 250, "level": 2}),
+            KnowledgeNode(node_id="base_005", name="数列的函数特性", topic="数列基础", prerequisites=["base_003"], position={"x": 500, "y": 250, "level": 2}),
         ]
-        
-        for node in arithmetic_nodes:
-            arithmetic_tree.nodes[node.node_id] = node
-            # 构建边
-            for prereq_id in node.prerequisites:
-                arithmetic_tree.edges.append((prereq_id, node.node_id))
-        
-        self.skill_trees["等差数列"] = arithmetic_tree
-        
-        # 等比数列专题
-        geometric_tree = SkillTree(topic="等比数列")
-        geometric_nodes = [
-            KnowledgeNode(
-                node_id="geo_001",
-                name="等比数列定义",
-                topic="等比数列",
-                prerequisites=["arith_001"],  # 依赖数列基础
-                is_root=False,
-                position={"x": 600, "y": 150, "level": 1}
-            ),
-            KnowledgeNode(
-                node_id="geo_002",
-                name="等比数列通项公式",
-                topic="等比数列",
-                prerequisites=["geo_001"],
-                position={"x": 600, "y": 250, "level": 2}
-            ),
-            KnowledgeNode(
-                node_id="geo_003",
-                name="等比数列求和公式",
-                topic="等比数列",
-                prerequisites=["geo_002"],
-                position={"x": 600, "y": 350, "level": 3}
-            ),
-            KnowledgeNode(
-                node_id="geo_004",
-                name="等比数列综合应用",
-                topic="等比数列",
-                prerequisites=["geo_003"],
-                position={"x": 600, "y": 450, "level": 4}
-            ),
+        for node in base_nodes:
+            base_tree.nodes[node.node_id] = node
+            for p in node.prerequisites:
+                base_tree.edges.append((p, node.node_id))
+        self.skill_trees["数列基础"] = base_tree
+
+        # ===== 2. 等差数列 =====
+        arith = SkillTree(topic="等差数列")
+        arith_nodes = [
+            KnowledgeNode(node_id="ap_001", name="等差数列定义", topic="等差数列", prerequisites=["base_002"], position={"x": 100, "y": 180, "level": 1}),
+            KnowledgeNode(node_id="ap_002", name="公差与公差范围判定", topic="等差数列", prerequisites=["ap_001"], position={"x": 50, "y": 280, "level": 2}),
+            KnowledgeNode(node_id="ap_003", name="通项公式推导与应用", topic="等差数列", prerequisites=["ap_001"], position={"x": 180, "y": 280, "level": 2}),
+            KnowledgeNode(node_id="ap_004", name="前n项和公式", topic="等差数列", prerequisites=["ap_003"], position={"x": 80, "y": 380, "level": 3}),
+            KnowledgeNode(node_id="ap_005", name="等差数列性质", topic="等差数列", prerequisites=["ap_003"], position={"x": 220, "y": 380, "level": 3}),
+            KnowledgeNode(node_id="ap_006", name="等差中项", topic="等差数列", prerequisites=["ap_005"], position={"x": 150, "y": 480, "level": 4}),
         ]
-        
-        for node in geometric_nodes:
-            geometric_tree.nodes[node.node_id] = node
-            for prereq_id in node.prerequisites:
-                geometric_tree.edges.append((prereq_id, node.node_id))
-        
-        self.skill_trees["等比数列"] = geometric_tree
+        for node in arith_nodes:
+            arith.nodes[node.node_id] = node
+            for p in node.prerequisites:
+                arith.edges.append((p, node.node_id))
+        self.skill_trees["等差数列"] = arith
+
+        # ===== 3. 等比数列 =====
+        geo = SkillTree(topic="等比数列")
+        geo_nodes = [
+            KnowledgeNode(node_id="gp_001", name="等比数列定义", topic="等比数列", prerequisites=["base_002"], position={"x": 350, "y": 180, "level": 1}),
+            KnowledgeNode(node_id="gp_002", name="公比与收敛发散判定", topic="等比数列", prerequisites=["gp_001"], position={"x": 300, "y": 280, "level": 2}),
+            KnowledgeNode(node_id="gp_003", name="通项公式推导与应用", topic="等比数列", prerequisites=["gp_001"], position={"x": 430, "y": 280, "level": 2}),
+            KnowledgeNode(node_id="gp_004", name="前n项和公式", topic="等比数列", prerequisites=["gp_003"], position={"x": 330, "y": 380, "level": 3}),
+            KnowledgeNode(node_id="gp_005", name="等比数列性质", topic="等比数列", prerequisites=["gp_003"], position={"x": 470, "y": 380, "level": 3}),
+            KnowledgeNode(node_id="gp_006", name="等比中项", topic="等比数列", prerequisites=["gp_005"], position={"x": 400, "y": 480, "level": 4}),
+        ]
+        for node in geo_nodes:
+            geo.nodes[node.node_id] = node
+            for p in node.prerequisites:
+                geo.edges.append((p, node.node_id))
+        self.skill_trees["等比数列"] = geo
+
+        # ===== 4. 数列求和 =====
+        sum_tree = SkillTree(topic="数列求和")
+        sum_nodes = [
+            KnowledgeNode(node_id="sum_001", name="公式求和法", topic="数列求和", prerequisites=["base_003"], position={"x": 580, "y": 180, "level": 1}),
+            KnowledgeNode(node_id="sum_002", name="分组求和法", topic="数列求和", prerequisites=["sum_001"], position={"x": 530, "y": 280, "level": 2}),
+            KnowledgeNode(node_id="sum_003", name="裂项相消法", topic="数列求和", prerequisites=["sum_001"], position={"x": 630, "y": 280, "level": 2}),
+            KnowledgeNode(node_id="sum_004", name="错位相减法", topic="数列求和", prerequisites=["sum_001"], position={"x": 730, "y": 280, "level": 2}),
+            KnowledgeNode(node_id="sum_005", name="倒序相加法", topic="数列求和", prerequisites=["sum_002"], position={"x": 580, "y": 380, "level": 3}),
+            KnowledgeNode(node_id="sum_006", name="数学归纳法求和应用", topic="数列求和", prerequisites=["sum_003", "sum_004"], position={"x": 680, "y": 380, "level": 3}),
+        ]
+        for node in sum_nodes:
+            sum_tree.nodes[node.node_id] = node
+            for p in node.prerequisites:
+                sum_tree.edges.append((p, node.node_id))
+        self.skill_trees["数列求和"] = sum_tree
+
+        # ===== 5. 递推数列 =====
+        recur = SkillTree(topic="递推数列")
+        recur_nodes = [
+            KnowledgeNode(node_id="rec_001", name="递推公式基本类型", topic="递推数列", prerequisites=["base_004"], position={"x": 800, "y": 130, "level": 1}),
+            KnowledgeNode(node_id="rec_002", name="待定系数法求通项", topic="递推数列", prerequisites=["rec_001"], position={"x": 760, "y": 240, "level": 2}),
+            KnowledgeNode(node_id="rec_003", name="累加/累乘求通项", topic="递推数列", prerequisites=["rec_001"], position={"x": 870, "y": 240, "level": 2}),
+            KnowledgeNode(node_id="rec_004", name="不动点法", topic="递推数列", prerequisites=["rec_002"], position={"x": 810, "y": 350, "level": 3}),
+            KnowledgeNode(node_id="rec_005", name="特征方程法", topic="递推数列", prerequisites=["rec_004"], position={"x": 810, "y": 440, "level": 4}),
+        ]
+        for node in recur_nodes:
+            recur.nodes[node.node_id] = node
+            for p in node.prerequisites:
+                recur.edges.append((p, node.node_id))
+        self.skill_trees["递推数列"] = recur
+
+        # ===== 6. 数学归纳法 =====
+        ind = SkillTree(topic="数学归纳法")
+        ind_nodes = [
+            KnowledgeNode(node_id="ind_001", name="数学归纳法原理", topic="数学归纳法", prerequisites=["base_002"], position={"x": 940, "y": 100, "level": 1}),
+            KnowledgeNode(node_id="ind_002", name="第一数学归纳法", topic="数学归纳法", prerequisites=["ind_001"], position={"x": 900, "y": 210, "level": 2}),
+            KnowledgeNode(node_id="ind_003", name="第二数学归纳法", topic="数学归纳法", prerequisites=["ind_001"], position={"x": 990, "y": 210, "level": 2}),
+            KnowledgeNode(node_id="ind_004", name="归纳-猜想-证明", topic="数学归纳法", prerequisites=["ind_002"], position={"x": 940, "y": 320, "level": 3}),
+            KnowledgeNode(node_id="ind_005", name="数列不等式归纳证明", topic="数学归纳法", prerequisites=["ind_004", "gp_004"], position={"x": 940, "y": 410, "level": 4}),
+        ]
+        for node in ind_nodes:
+            ind.nodes[node.node_id] = node
+            for p in node.prerequisites:
+                ind.edges.append((p, node.node_id))
+        self.skill_trees["数学归纳法"] = ind
     
     def get_skill_tree(self, topic: str) -> Optional[SkillTree]:
         """获取技能树"""

@@ -20,6 +20,8 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Depends, Query
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from database.db import get_db
 from services.irt_ranking_service import IRTRankingService, get_user_ranking_info
 from algorithms.question_deduplication import QuestionDeduplicationService, diversify_question_queue
 from utils.logger import logger
@@ -94,24 +96,21 @@ class DiversifyQueueResponse(BaseModel):
 
 @router.get("/current", response_model=RankingDataResponse)
 async def get_current_ranking(
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """
-    获取当前段位信息
-    
-    返回用户当前的IRT段位、进度、下一目标等信息
-    """
+    """获取当前段位信息"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"获取当前段位: 用户={user_id}")
-        
-        data = get_user_ranking_info(user_id)
-        
+
+        data = await get_user_ranking_info(db, user_id)
+
         return RankingDataResponse(
             success=True,
             **data
         )
-        
+
     except Exception as e:
         logger.error(f"获取段位信息失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -120,27 +119,24 @@ async def get_current_ranking(
 @router.get("/trend", response_model=RankTrendResponse)
 async def get_rank_trend(
     days: int = Query(30, ge=7, le=90, description="天数范围"),
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """
-    获取段位趋势
-    
-    用于绘制段位趋势图，展示θ值和段位的历史变化
-    """
+    """获取段位趋势"""
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"获取段位趋势: 用户={user_id}, 天数={days}")
-        
+
         service = IRTRankingService()
-        trend_data = service.get_rank_trend(user_id, days)
-        
+        trend_data = await service.get_rank_trend(db, user_id, days)
+
         return RankTrendResponse(
             success=True,
             user_id=user_id,
             days=days,
             data=trend_data
         )
-        
+
     except Exception as e:
         logger.error(f"获取段位趋势失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -158,7 +154,7 @@ async def check_rank_change(
     用于答题后检测是否升级/降级，触发动画
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"检查段位变化: 用户={user_id}, θ {old_theta} → {new_theta}")
         
         service = IRTRankingService()
@@ -230,7 +226,7 @@ async def diversify_queue(
     3. 队列重排
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"题目队列多样化: 用户={user_id}, 原队列{len(request.questions)}题")
         
         # 检查原队列违规情况

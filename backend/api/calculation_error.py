@@ -92,7 +92,7 @@ async def diagnose_error(
     识别纯计算失误 vs 逻辑/公式错误
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"诊断错误: 用户={user_id}")
         
         handler = CalculationErrorHandler()
@@ -130,7 +130,7 @@ async def calculate_score_with_protection(
     对应需求17: 纯计算失误时不降低Actual权重
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"计算受保护分数: 用户={user_id}")
         
         handler = CalculationErrorHandler()
@@ -169,7 +169,7 @@ async def diagnose_and_calculate(
     诊断错误并计算分数（组合接口）
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         logger.info(f"诊断并计算: 用户={user_id}")
         
         result = diagnose_and_protect_score(
@@ -202,7 +202,7 @@ async def get_light_hint(
     对应需求17: 纯计算失误时弹出轻提示，不触发L1-L4降权重
     """
     try:
-        user_id = current_user.get('id', 0)
+        user_id = current_user.id
         
         handler = CalculationErrorHandler()
         
