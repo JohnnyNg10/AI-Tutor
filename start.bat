@@ -17,6 +17,23 @@ echo   Close each window to stop that server.
 echo ============================================
 echo.
 
+REM Ensure Redis is running
+echo Checking Redis...
+"C:\Program Files\Redis\redis-cli.exe" ping >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Starting Redis...
+    start "Redis" /MIN "C:\Program Files\Redis\redis-server.exe" --port 6379
+    timeout /t 2 >nul
+    "C:\Program Files\Redis\redis-cli.exe" ping >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo WARNING: Redis failed to start. Backend may not work properly.
+    ) else (
+        echo Redis is ready.
+    )
+) else (
+    echo Redis is already running.
+)
+
 REM Generate temp startup scripts to avoid space-in-path issues
 set "BACKEND_BAT=%TEMP%\ai_tutor_backend.bat"
 set "FRONTEND_BAT=%TEMP%\ai_tutor_frontend.bat"
