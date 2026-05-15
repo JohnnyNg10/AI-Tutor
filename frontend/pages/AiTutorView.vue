@@ -1,138 +1,54 @@
 <template>
-  <div class="ai-tutor-page" :class="{ 'sidebar-collapsed': isSidebarCollapsed }">
-    <!-- 左侧边栏 -->
-    <aside class="sidebar">
-      <div class="user-section" @click="showEditProfile = true">
-        <div class="user-avatar-large">
-          <img v-if="isImageAvatar(userInfo.avatar)" :src="userInfo.avatar" class="avatar-img" />
-          <span v-else>{{ userInfo.avatar }}</span>
-        </div>
-        <div class="user-info" v-show="!isSidebarCollapsed">
-          <span class="user-name">{{ userInfo.name }}</span>
-          <span class="edit-hint">✏️ 点击编辑</span>
-        </div>
-      </div>
-      
-      <button class="toggle-btn" @click.stop="toggleSidebar">
-        {{ isSidebarCollapsed ? '→' : '←' }}
-      </button>
-
-      <!-- 新建会话按钮 -->
-      <div class="new-chat-section" v-show="!isSidebarCollapsed">
+  <AppLayout ref="layoutRef" :hide-avatar="true">
+    <template #new-chat>
+      <div class="sidebar-new-chat">
         <button class="new-chat-btn" @click="createNewConversation">
-          <span>➕</span>
-          <span>新建对话</span>
+          <PlusCircle :size="18" />
+          <span>新对话</span>
         </button>
       </div>
+    </template>
 
-      <nav class="nav-menu">
-        <!-- 快速导航 -->
-        <div class="quick-nav" v-show="!isSidebarCollapsed">
-          <div class="nav-header">
-            <span class="nav-title">🧭 发现</span>
-          </div>
-          <router-link to="/ai-tutor" class="nav-item active">
-            <span class="nav-icon">💬</span>
-            <span>AI 提问</span>
-          </router-link>
-          <router-link to="/recommend" class="nav-item">
-            <span class="nav-icon">✨</span>
-            <span>数列推荐</span>
-          </router-link>
-          <router-link to="/mistake-book" class="nav-item">
-            <span class="nav-icon">📝</span>
-            <span>练习中心</span>
-          </router-link>
-          <router-link to="/profile" class="nav-item">
-            <span class="nav-icon">📊</span>
-            <span>学习画像</span>
-          </router-link>
+    <template #history>
+      <div class="sidebar-history">
+        <div class="history-header">
+          <span class="history-title">历史会话</span>
+          <span class="history-count">{{ conversations.length }}</span>
         </div>
-
-
-        <!-- 历史会话列表 -->
-        <div class="history-section" v-show="!isSidebarCollapsed">
-          <div class="history-header">
-            <span class="history-title">💬 历史会话</span>
-            <span class="history-count">{{ conversations.length }}</span>
-          </div>
-          
-          <div class="history-list">
-            <div 
-              v-for="conv in sortedConversations" 
-              :key="conv.id"
-              class="history-item"
-              :class="{ 
-                'active': currentConversationId === conv.id, 
-                'editing': editingId === conv.id 
-              }"
-              @click="editingId !== conv.id && switchConversation(conv.id)"
-            >
-              <div class="history-icon">💭</div>
-              
-              <!-- 重命名输入框 -->
-              <div v-if="editingId === conv.id" class="history-edit-box" @click.stop>
-                <input 
-                  v-model="editingTitle" 
-                  @keyup.enter="saveRename"
-                  @keyup.esc="cancelRename"
-                  @blur="saveRename"
-                  ref="renameInput"
-                  type="text"
-                />
-              </div>
-              
-              <!-- 正常显示 -->
-              <template v-else>
-                <div class="history-content">
-                  <div class="history-name" :title="conv.title">{{ conv.title }}</div>
-                  <div class="history-meta">
-                    {{ formatTime(conv.updateTime) }} · {{ conv.messages.length }}条
-                  </div>
-                </div>
-                <div class="history-actions">
-                  <button class="action-btn edit-btn" @click.stop="startRename(conv)" title="重命名">
-                    ✏️
-                  </button>
-                  <button class="action-btn delete-btn" @click.stop="deleteConversation(conv.id)" title="删除">
-                    ✕
-                  </button>
-                </div>
-              </template>
-            </div>
-          </div>
-        </div>
-
-        <!-- 折叠状态 -->
-        <div v-show="isSidebarCollapsed" class="collapsed-icons">
-          <div 
-            v-for="conv in conversations.slice(0, 3)" 
+        <div class="history-list">
+          <div
+            v-for="conv in sortedConversations"
             :key="conv.id"
-            class="collapsed-history-item"
-            :class="{ 'active': currentConversationId === conv.id }"
-            @click="switchConversation(conv.id)"
-            :title="conv.title"
+            class="history-item"
+            :class="{ active: currentConversationId === conv.id, editing: editingId === conv.id }"
+            @click="editingId !== conv.id && switchConversation(conv.id)"
           >
-            💭
+            <History :size="16" class="history-icon" />
+            <div v-if="editingId === conv.id" class="history-edit-box" @click.stop>
+              <input v-model="editingTitle" @keyup.enter="saveRename" @keyup.esc="cancelRename" @blur="saveRename" ref="renameInput" type="text" />
+            </div>
+            <template v-else>
+              <div class="history-content">
+                <div class="history-name" :title="conv.title">{{ conv.title }}</div>
+                <div class="history-meta">{{ formatTime(conv.updateTime) }} · {{ conv.messages.length }}条</div>
+              </div>
+              <div class="history-actions">
+                <button class="action-btn" @click.stop="startRename(conv)" title="重命名"><Pencil :size="12" /></button>
+                <button class="action-btn" @click.stop="deleteConversation(conv.id)" title="删除"><X :size="12" /></button>
+              </div>
+            </template>
           </div>
-          <div v-if="conversations.length > 3" class="collapsed-more">...</div>
         </div>
-      </nav>
-
-      <div class="sidebar-footer" v-show="!isSidebarCollapsed">
-        <button class="logout-btn" @click="logout">
-          <span>🚪</span>
-          <span>退出登录</span>
-        </button>
       </div>
-    </aside>
-    
-    <!-- 中间主内容区 -->
-    <main class="main-content">
-      <div class="mobile-header">
-        <button class="mobile-menu-btn" @click="toggleSidebar">☰</button>
-        <span class="mobile-title">AI Tutor</span>
-        <button class="mobile-new-btn" @click="createNewConversation">➕</button>
+    </template>
+
+    <div class="ai-tutor-content">
+      <div class="top-bar">
+        <div class="top-bar-spacer"></div>
+        <div class="top-bar-avatar" @click="toggleUserOverlay">
+          <img v-if="isImageAvatar(userInfo.avatar)" :src="userInfo.avatar" class="avatar-img" alt="" />
+          <User v-else :size="20" />
+        </div>
       </div>
 
       <div class="workspace">
@@ -140,15 +56,22 @@
           <!-- 空状态 -->
           <div v-if="!currentConversation || currentMessages.length === 0" class="welcome-screen">
             <div class="welcome-content">
-              <div class="welcome-icon">🎓</div>
-              <h1 class="welcome-title">AI Tutor</h1>
-              <p class="welcome-subtitle">{{ currentConversation?.title || '开始新的学习之旅' }}</p>
+              <h1 class="welcome-title">今天想练习什么数学题？</h1>
+              <p class="welcome-subtitle">试试以下问题吧！</p>
               <div class="suggested-questions">
-                <p class="suggest-hint">试试这样问我：</p>
-                <div class="question-chips">
-                  <button class="chip" @click="quickAsk('求等差数列 3, 7, 11... 的前10项和')">求等差数列前10项和</button>
-                  <button class="chip" @click="quickAsk('解释等比数列通项公式')">解释等比数列通项公式</button>
-                  <button class="chip" @click="quickAsk('用裂项相消法求 1/(n(n+1)) 的前n项和')">裂项相消法求和</button>
+                <div class="suggestion-cards">
+                  <button class="suggestion-card" @click="quickAsk('求等差数列 3, 7, 11... 的前10项和')">
+                    <span class="suggestion-title">等差数列求和</span>
+                    <span class="suggestion-desc">求等差数列 3, 7, 11... 的前10项和</span>
+                  </button>
+                  <button class="suggestion-card" @click="quickAsk('解释等比数列通项公式推导')">
+                    <span class="suggestion-title">等比数列公式</span>
+                    <span class="suggestion-desc">解释等比数列通项公式推导</span>
+                  </button>
+                  <button class="suggestion-card" @click="quickAsk('用裂项相消法求 1/(n(n+1)) 的前n项和')">
+                    <span class="suggestion-title">裂项相消法</span>
+                    <span class="suggestion-desc">求 1/(n(n+1)) 的前n项和</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -180,7 +103,7 @@
 
               <!-- AI消息 -->
               <div v-else class="message ai-message">
-                <div class="message-avatar">🤖</div>
+                <div class="message-avatar ai-avatar"><Sparkles :size="20" /></div>
                 <div class="message-content">
                   <div class="message-header">
                     <span class="sender">AI Tutor</span>
@@ -199,33 +122,36 @@
         </div>
 
         <!-- 输入区域 -->
-        <div class="input-wrapper">
+        <div class="input-area">
           <div class="input-inner">
-            <div class="input-card">
+            <div class="input-pill">
+              <!-- Image preview mini -->
               <div class="input-toolbar" v-if="previewImage">
                 <div class="image-preview-mini">
                   <img :src="previewImage" />
-                  <span class="remove-img" @click="clearImage">✕</span>
+                  <button class="remove-img" @click="clearImage"><X :size="14" /></button>
                 </div>
               </div>
-              
-              <div class="hint-level-toolbar">
-                <span class="hint-level-label">提示等级</span>
-                <button
-                  v-for="option in hintLevelOptions"
-                  :key="option.value"
-                  class="hint-level-btn"
-                  :class="{ active: selectedHintLevel === option.value }"
-                  type="button"
-                  @click="selectedHintLevel = option.value"
-                  :title="option.desc"
-                >
-                  {{ option.value }} · {{ option.label }}
-                </button>
-              </div>
 
+              <!-- Hint level pills + textarea + actions in one row -->
               <div class="input-main">
-                <textarea 
+                <div class="hint-level-pills">
+                  <button
+                    v-for="option in visibleHintPills"
+                    :key="option.value"
+                    class="hint-pill"
+                    :class="{ active: selectedHintLevel === option.value }"
+                    type="button"
+                    @click="handleHintPillClick(option.value)"
+                    :title="option.desc"
+                  >
+                    {{ option.value }}
+                  </button>
+                </div>
+
+                <div class="input-separator">|</div>
+
+                <textarea
                   v-model="questionText"
                   placeholder="输入数列题目或上传图片..."
                   rows="1"
@@ -233,84 +159,36 @@
                   ref="textareaRef"
                   @input="autoResize"
                 ></textarea>
-                
+
                 <div class="input-actions">
-                  <button class="action-icon upload-btn" @click="triggerUpload" title="上传图片">
-                    📷
+                  <button class="action-btn upload-btn" @click="triggerUpload" title="上传图片">
+                    <ImagePlus :size="20" />
                   </button>
-                  <input 
-                    type="file" 
+                  <input
+                    type="file"
                     ref="fileInput"
                     accept="image/*"
                     style="display: none"
                     @change="handleFileChange"
                   />
-                  
-                  <button 
-                    class="send-btn" 
+
+                  <button
+                    class="action-btn send-btn"
                     @click="submitQuestion"
                     :disabled="isLoading || (!questionText && !previewImage)"
-                    :class="{ 'active': questionText || previewImage }"
+                    :class="{ 'has-content': questionText || previewImage }"
                   >
-                    <span v-if="isLoading">⏳</span>
-                    <span v-else>➤</span>
+                    <Loader v-if="isLoading" :size="18" class="spinning" />
+                    <Send v-else :size="18" />
                   </button>
                 </div>
               </div>
-              
-              <div class="input-footer-bar">
-                <span class="hint">Enter 发送，Shift + Enter 换行</span>
-                <span class="session-hint" v-if="currentConversation">
-                  {{ currentConversation.title }}
-                </span>
-              </div>
             </div>
+
+            <p class="input-hint">Enter 发送，Shift + Enter 换行</p>
           </div>
         </div>
       </div>
-    </main>
-
-    <!-- 右侧消息导航 -->
-    <aside class="memory-panel" v-show="!isMemoryCollapsed">
-      <div class="memory-header">
-        <h3>消息导航</h3>
-        <button class="close-btn" @click="isMemoryCollapsed = true">✕</button>
-      </div>
-      
-      <div class="memory-list" v-if="currentMessages.length > 0">
-        <div 
-          v-for="(msg, index) in currentMessages.filter(m => m.role === 'user')" 
-          :key="index"
-          class="memory-item"
-          @click="scrollToMessage(index)"
-        >
-          <div class="memory-number">#{{ Math.floor(index/2) + 1 }}</div>
-          <div class="memory-content">
-            <div class="memory-question">{{ truncate(msg.content, 20) || '[图片]' }}</div>
-            <div class="memory-time">{{ msg.time }}</div>
-          </div>
-        </div>
-      </div>
-      
-      <div class="memory-empty" v-else>
-        <p>还没有消息</p>
-        <p class="sub">在下方输入框开始提问</p>
-      </div>
-
-      <div class="memory-footer">
-        <button class="clear-btn" @click="clearCurrentConversation" v-if="currentMessages.length > 0">
-          🗑️ 清空当前会话
-        </button>
-      </div>
-    </aside>
-
-    <button 
-      class="memory-toggle-btn" 
-      v-show="isMemoryCollapsed" 
-      @click="isMemoryCollapsed = false"
-    >
-      📋
-    </button>
 
     <!-- 用户信息编辑弹窗 -->
     <div class="modal-overlay" v-if="showEditProfile" @click="showEditProfile = false">
@@ -362,7 +240,7 @@
                 @change="handleAvatarChange"
               />
               <div v-if="!tempUserInfo.avatarPreview" class="upload-placeholder">
-                <span class="upload-icon">📤</span>
+                <Upload :size="32" />
                 <span>点击上传头像</span>
               </div>
               <img v-else :src="tempUserInfo.avatarPreview" class="avatar-preview-upload" />
@@ -383,18 +261,21 @@
       </div>
     </div>
   </div>
+</AppLayout>
 </template>
 
 <script setup>
-// ========== 第1步：导入API（新增）==========
 import { sendQuestion } from '../services/tutor-api.js'
-
-import { ref, reactive, nextTick, computed, onMounted, watch } from 'vue'
+import { ref, reactive, nextTick, computed, onMounted, watch, inject } from 'vue'
 import { useRouter } from 'vue-router'
+import AppLayout from '../components/AppLayout.vue'
+import { PlusCircle, History, Pencil, X, User, Sparkles, ImagePlus, Send, Loader, Upload } from 'lucide-vue-next'
 import { marked } from 'marked'
 import katex from 'katex'
 
 const router = useRouter()
+
+const toggleUserOverlay = inject('toggleUserOverlay', () => {})
 
 // ==================== Markdown + LaTeX 渲染 ====================
 const renderContent = (text) => {
@@ -459,12 +340,6 @@ const renderContent = (text) => {
   })
 
   return html
-}
-
-// ==================== 侧边栏状态 ====================
-const isSidebarCollapsed = ref(false)
-const toggleSidebar = () => {
-  isSidebarCollapsed.value = !isSidebarCollapsed.value
 }
 
 // ==================== 会话管理 ====================
@@ -655,18 +530,7 @@ const saveUserInfo = () => {
   showEditProfile.value = false
 }
 
-// ==================== 【修改后的退出登录】====================
-const logout = () => {
-  if (confirm('确定要退出登录吗？')) {
-    // 清除登录凭证（关键！）
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('user_info')
-    localStorage.removeItem('remember_user')
-    
-    // 跳转到登录页
-    router.push('/login')
-  }
-}
+// ==================== 导航 ====================
 
 // ==================== 消息输入（已对接后端）====================
 const questionText = ref('')
@@ -684,6 +548,23 @@ const hintLevelOptions = [
   { value: 'L4', label: '答案', desc: '给出完整解答与结论' }
 ]
 const selectedHintLevel = ref('L0')
+
+const currentHintIndex = computed(() => hintLevelOptions.findIndex(o => o.value === selectedHintLevel.value))
+
+const visibleHintPills = computed(() => {
+  const start = Math.min(currentHintIndex.value, hintLevelOptions.length - 3)
+  return hintLevelOptions.slice(start, start + 3)
+})
+
+const handleHintPillClick = (value) => {
+  if (selectedHintLevel.value === value) {
+    const idx = hintLevelOptions.findIndex(o => o.value === value)
+    const next = (idx + 1) % hintLevelOptions.length
+    selectedHintLevel.value = hintLevelOptions[next].value
+  } else {
+    selectedHintLevel.value = value
+  }
+}
 
 const autoResize = () => {
   const textarea = textareaRef.value
@@ -836,6 +717,111 @@ watch(currentMessages, () => {
 <style scoped>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ---- 新布局 (Figmm-matched) ---- */
+.ai-tutor-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+  background: var(--color-bg-main);
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 32px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.top-bar-avatar {
+  width: 36px; height: 36px;
+  border-radius: 50%; overflow: hidden;
+  cursor: pointer;
+  background: var(--color-border);
+  display: flex;
+  align-items: center; justify-content: center;
+  color: var(--color-text-secondary);
+}
+.top-bar-avatar .avatar-img { width: 100%; height: 100%; object-fit: cover; }
+
+/* sidebar slots */
+.sidebar-new-chat { padding: 0; }
+.sidebar-new-chat .new-chat-btn {
+  width: 100%;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px;
+  background: var(--color-bg-main);
+  color: var(--color-text-title);
+  border: none;
+  border-radius: var(--radius-base);
+  font-family: var(--font-family);
+  font-size: var(--font-base); font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.sidebar-new-chat .new-chat-btn:hover {
+  transform: scale(1.04);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.10);
+}
+
+.sidebar-history {
+  width: 100%;
+  background: var(--color-bg-main);
+  border-radius: var(--radius-lg);
+  padding: 10px;
+  display: flex; flex-direction: column; gap: 4px;
+  flex: 1; min-height: 0; overflow: hidden;
+}
+.sidebar-history .history-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0 4px 6px;
+}
+.sidebar-history .history-title {
+  font-family: var(--font-family);
+  font-weight: 600; font-size: var(--font-sm); color: var(--color-text-title);
+}
+.sidebar-history .history-count {
+  font-size: 11px; color: var(--color-text-secondary);
+  background: var(--color-border); padding: 2px 6px; border-radius: 10px;
+}
+.sidebar-history .history-list {
+  flex: 1; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px; min-height: 0;
+}
+.sidebar-history .history-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius-base);
+  cursor: pointer; transition: background 0.15s; font-size: 13px;
+}
+.sidebar-history .history-item:hover { background: rgba(0,0,0,0.04); }
+.sidebar-history .history-item.active { background: var(--color-primary-light); }
+.sidebar-history .history-icon { color: var(--color-text-secondary); flex-shrink: 0; }
+.sidebar-history .history-content { flex: 1; min-width: 0; }
+.sidebar-history .history-name {
+  font-size: 13px; color: var(--color-text-body);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sidebar-history .history-meta { font-size: 11px; color: var(--color-text-secondary); margin-top: 1px; }
+.sidebar-history .history-actions {
+  display: flex; gap: 2px; opacity: 0; transition: opacity 0.2s;
+}
+.sidebar-history .history-item:hover .history-actions { opacity: 1; }
+.sidebar-history .history-edit-box input {
+  width: 100%; border: 1px solid var(--color-primary); border-radius: 4px;
+  padding: 4px 6px; font-size: 13px; background: white; outline: none;
+}
+.sidebar-history .action-btn {
+  width: 22px; height: 22px; border: none; background: transparent;
+  cursor: pointer; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--color-text-secondary); transition: all 0.15s;
+}
+.sidebar-history .action-btn:hover { background: rgba(0,0,0,0.08); color: var(--color-error); }
+
+/* ---- 旧样式保留 ---- */
 .ai-tutor-page {
   width: 100vw;
   height: 100vh;
@@ -1251,48 +1237,63 @@ watch(currentMessages, () => {
 
 .welcome-content { text-align: center; width: 100%; }
 
-.welcome-icon { font-size: 64px; margin-bottom: 20px; }
-
 .welcome-title {
-  font-size: 36px;
+  font-size: 28px;
   font-weight: 700;
-  color: #1d1d1f;
+  color: var(--color-text-title);
   margin: 0 0 8px 0;
-  letter-spacing: -1px;
+  letter-spacing: -0.5px;
 }
 
 .welcome-subtitle {
   font-size: 16px;
-  color: #86868b;
+  color: var(--color-text-secondary);
   margin: 0 0 40px 0;
 }
 
 .suggested-questions { text-align: center; }
 
-.suggest-hint { font-size: 13px; color: #999; margin-bottom: 12px; }
-
-.question-chips {
+.suggestion-cards {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  gap: 16px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
-.chip {
-  padding: 8px 16px;
-  background: #f5f5f7;
-  border: 1px solid #e1e1e1;
-  border-radius: 20px;
-  font-size: 14px;
-  color: #555;
+.suggestion-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px;
+  background: var(--color-primary);
+  border: none;
+  border-radius: 16px;
   cursor: pointer;
   transition: all 0.2s;
+  min-width: 200px;
+  max-width: 260px;
 }
 
-.chip:hover {
-  background: #e8e8e8;
-  border-color: #d0d0d0;
-  transform: translateY(-1px);
+.suggestion-card:hover {
+  filter: brightness(0.9);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(14, 97, 172, 0.3);
+}
+
+.suggestion-title {
+  font-family: var(--font-family);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-bg-main);
+}
+
+.suggestion-desc {
+  font-family: var(--font-family);
+  font-size: 13px;
+  color: var(--color-bg-main);
+  opacity: 0.85;
+  line-height: 1.4;
 }
 
 .messages-list {
@@ -1412,172 +1413,198 @@ watch(currentMessages, () => {
   50%, 100% { background-color: #e0e0e0; }
 }
 
-.input-wrapper {
-  border-top: 1px solid #e5e5e5;
-  background: #ffffff;
-  padding: 20px;
+.input-area {
+  flex-shrink: 0;
+  padding: 16px 32px 24px;
   width: 100%;
 }
 
 .input-inner {
   width: 100%;
-  max-width: 600px;
+  max-width: 680px;
   margin-left: auto;
   margin-right: auto;
 }
 
-.input-card {
-  background: #f9f9f9;
-  border: 1px solid #e0e0e0;
-  border-radius: 16px;
-  padding: 16px 20px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+.input-pill {
+  background: var(--color-text-white);
+  border: 1px solid var(--color-border);
+  border-radius: 28px;
+  padding: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
 }
 
-.input-toolbar { margin-bottom: 12px; }
-
-.hint-level-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.hint-level-label {
-  font-size: 12px;
-  color: #666;
-  font-weight: 600;
-  margin-right: 2px;
-}
-
-.hint-level-btn {
-  border: 1px solid #d9d9d9;
-  background: #fff;
-  color: #555;
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.hint-level-btn:hover {
-  border-color: #0071e3;
-  color: #0071e3;
-}
-
-.hint-level-btn.active {
-  background: #e8f2ff;
-  border-color: #0071e3;
-  color: #005bb5;
-  font-weight: 600;
+.input-toolbar {
+  padding: 4px 8px 0;
 }
 
 .image-preview-mini {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: white;
-  padding: 4px 8px;
+  background: var(--color-bg-main);
+  padding: 4px 8px 4px 8px;
   border-radius: 8px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--color-border);
 }
 
-.image-preview-mini img { height: 40px; border-radius: 4px; }
+.image-preview-mini img {
+  height: 36px;
+  border-radius: 4px;
+}
 
 .remove-img {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
   cursor: pointer;
-  color: #999;
-  font-size: 12px;
-  padding: 4px;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  padding: 0;
 }
 
-.remove-img:hover { color: #ff4d4f; }
+.remove-img:hover {
+  background: var(--color-error);
+  color: white;
+}
 
 .input-main {
   display: flex;
-  gap: 12px;
-  align-items: flex-end;
+  gap: 8px;
+  align-items: center;
   width: 100%;
 }
 
-textarea {
+.hint-level-pills {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  flex-shrink: 0;
+}
+
+.hint-pill {
+  width: 32px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 16px;
+  font-family: var(--font-family);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hint-pill:hover {
+  background: rgba(0, 113, 227, 0.08);
+  color: var(--color-primary);
+}
+
+.hint-pill.active {
+  background: var(--color-primary);
+  color: white;
+}
+
+.input-separator {
+  color: var(--color-border);
+  font-size: 16px;
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+
+.input-main textarea {
   flex: 1;
   border: none;
   background: transparent;
+  font-family: var(--font-family);
   font-size: 15px;
   line-height: 1.6;
   resize: none;
   max-height: 200px;
   min-height: 24px;
-  padding: 0;
+  padding: 0 4px;
   outline: none;
-  color: #1d1d1f;
-  width: 100%;
+  color: var(--color-text-title);
   min-width: 0;
 }
 
-textarea::placeholder { color: #999; }
+.input-main textarea::placeholder {
+  color: var(--color-text-secondary);
+}
 
 .input-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
-.action-icon {
-  width: 32px;
-  height: 32px;
+.action-btn {
+  width: 36px;
+  height: 36px;
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 50%;
   transition: all 0.2s;
+  color: var(--color-text-secondary);
 }
 
-.action-icon:hover { background: #e8e8e8; }
+.action-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
 
 .send-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: #e0e0e0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.send-btn.has-content {
+  background: var(--color-primary);
   color: white;
-  border-radius: 8px;
+}
+
+.send-btn.has-content:hover {
+  filter: brightness(0.9);
+}
+
+.send-btn:disabled {
   cursor: not-allowed;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  transition: all 0.2s;
 }
 
-.send-btn.active {
-  background: #1d1d1f;
-  cursor: pointer;
+.spinning {
+  animation: spin 1s linear infinite;
 }
 
-.send-btn.active:hover { background: #000; transform: scale(1.05); }
-
-.input-footer-bar {
-  margin-top: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-.hint { font-size: 12px; color: #bbb; }
-
-.session-hint {
+.input-hint {
+  text-align: center;
   font-size: 12px;
-  color: #0071e3;
-  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-top: 8px;
+}
+
+.ai-avatar {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
 
 .memory-panel {

@@ -35,7 +35,7 @@ const buildQuery = (params = {}) => {
   return str ? `?${str}` : ''
 }
 
-async function request(endpoint, options = {}) {
+export async function request(endpoint, options = {}) {
   const token = getAuthToken()
   const headers = { ...(options.headers || {}) }
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
