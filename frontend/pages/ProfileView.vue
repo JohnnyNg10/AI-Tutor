@@ -1,50 +1,12 @@
 <template>
-  <div class="profile-page" :class="{ 'sidebar-collapsed': isSidebarCollapsed }">
-    <!-- 侧边栏 -->
-    <aside class="sidebar">
-      <div class="user-section">
-        <div class="user-avatar-large">
-          <span>{{ userInfo.avatar }}</span>
-        </div>
-        <div class="user-info" v-show="!isSidebarCollapsed">
-          <span class="user-name">{{ userInfo.name }}</span>
-          <span class="user-level">学习画像</span>
-        </div>
-      </div>
-
-      <button class="toggle-btn" @click.stop="toggleSidebar">
-        {{ isSidebarCollapsed ? '→' : '←' }}
-      </button>
-
-      <div class="quick-nav" v-show="!isSidebarCollapsed">
-        <router-link to="/ai-tutor" class="nav-item">
-          <span class="nav-icon">💬</span><span>AI 提问</span>
-        </router-link>
-        <router-link to="/recommend" class="nav-item">
-          <span class="nav-icon">✨</span><span>智能推荐</span>
-        </router-link>
-        <router-link to="/exercises" class="nav-item">
-          <span class="nav-icon">📝</span><span>练习中心</span>
-        </router-link>
-        <router-link to="/mistake-book" class="nav-item">
-          <span class="nav-icon">📕</span><span>错题本</span>
-        </router-link>
-        <router-link to="/profile" class="nav-item active">
-          <span class="nav-icon">📊</span><span>学习画像</span>
-        </router-link>
-      </div>
-
-      <div class="sidebar-footer" v-show="!isSidebarCollapsed">
-        <button class="logout-btn" @click="logout">
-          <span>🚪</span><span>退出登录</span>
-        </button>
-      </div>
-    </aside>
-
-    <div class="content main-content">
+  <AppLayout>
+    <div class="content">
       <div class="header-row">
-        <h1>📊 学习画像与掌握度</h1>
-        <button class="refresh-btn" :disabled="loading" @click="loadAll">
+        <h1>
+          <BarChart3 :size="24" />
+          学习画像与掌握度
+        </h1>
+        <button class="btn btn-primary" :disabled="loading" @click="loadAll">
           {{ loading ? '加载中...' : '刷新数据' }}
         </button>
       </div>
@@ -197,24 +159,14 @@
         </div>
       </section>
     </div>
-  </div>
+  </AppLayout>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { BarChart3 } from 'lucide-vue-next'
+import AppLayout from '../components/AppLayout.vue'
 import { ensureCurrentUserId, exercisesAPI } from '../services/apiService'
-
-const router = useRouter()
-const isSidebarCollapsed = ref(false)
-const toggleSidebar = () => { isSidebarCollapsed.value = !isSidebarCollapsed.value }
-const userInfo = ref({ name: '', avatar: '👤' })
-
-const logout = () => {
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('user_info')
-  router.push('/login')
-}
 
 const loading = ref(false)
 const error = ref('')
@@ -364,13 +316,6 @@ const loadAll = async () => {
   error.value = ''
   try {
     userId.value = await ensureCurrentUserId()
-    const stored = localStorage.getItem('user_info')
-    if (stored) {
-      const info = JSON.parse(stored)
-      userInfo.value.name = info.username || info.name || '用户'
-      userInfo.value.avatar = info.avatar || '👤'
-    }
-
     const [dashboardRes, controlRes, treatmentRes] = await Promise.all([
       exercisesAPI.getMasteryDashboard({ userId: userId.value, trendLimit: 30 }),
       exercisesAPI.getAbTestStats({ algorithmVersion: 'control', limit: 1000 }),
@@ -393,213 +338,73 @@ onMounted(loadAll)
 </script>
 
 <style scoped>
-/* ===== 布局 ===== */
-.profile-page {
-  display: flex;
-  min-height: 100vh;
-  background: #f5f7fb;
-}
+.content { padding: 32px; max-width: var(--max-content-width); margin: 0 auto; }
 
-.sidebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 240px;
-  height: 100vh;
-  background: linear-gradient(160deg, #1e3a5f 0%, #2563eb 100%);
-  display: flex;
-  flex-direction: column;
-  padding: 20px 16px;
-  z-index: 100;
-  transition: width 0.3s ease;
-  overflow: hidden;
-}
-
-.profile-page.sidebar-collapsed .sidebar { width: 64px; }
-.profile-page.sidebar-collapsed .main-content { margin-left: 64px; }
-
-.main-content { margin-left: 240px; flex: 1; transition: margin-left 0.3s ease; }
-
-.user-section {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid rgba(255,255,255,0.15);
-}
-
-.user-avatar-large {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  flex-shrink: 0;
-}
-
-.user-info { display: flex; flex-direction: column; overflow: hidden; }
-.user-name { color: white; font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.user-level { color: rgba(255,255,255,0.65); font-size: 12px; margin-top: 2px; }
-
-.toggle-btn {
-  align-self: flex-end;
-  background: rgba(255,255,255,0.15);
-  border: none;
-  color: white;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.quick-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  color: rgba(255,255,255,0.8);
-  text-decoration: none;
-  font-size: 14px;
-  transition: background 0.2s;
-  white-space: nowrap;
-}
-
-.nav-item:hover { background: rgba(255,255,255,0.15); color: white; }
-.nav-item.active { background: rgba(255,255,255,0.25); color: white; font-weight: 600; }
-.nav-icon { font-size: 18px; width: 24px; text-align: center; flex-shrink: 0; }
-
-.sidebar-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.15); }
-
-.logout-btn {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 10px 12px;
-  background: rgba(255,255,255,0.1);
-  border: none;
-  border-radius: 10px;
-  color: rgba(255,255,255,0.85);
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.2s;
-  white-space: nowrap;
-}
-.logout-btn:hover { background: rgba(255,255,255,0.2); }
-
-/* ===== 内容区 ===== */
-.content { padding: 28px; max-width: 1100px; margin: 0 auto; }
 .header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-.sub { color: #666; margin-bottom: 12px; }
-.error { color: #d93025; margin-bottom: 12px; }
-.refresh-btn { border: none; background: #1d4ed8; color: #fff; padding: 8px 14px; border-radius: 8px; cursor: pointer; }
-.refresh-btn:disabled { opacity: .65; cursor: not-allowed; }
-.card { background: #fff; border: 1px solid #e9edf2; border-radius: 14px; padding: 16px; margin-bottom: 16px; }
-.card h2 { font-size: 16px; margin-bottom: 12px; }
-.empty { color: #888; font-size: 14px; }
+.header-row h1 { font-size: var(--font-xxl); font-weight: 700; color: var(--color-text-title); display: flex; align-items: center; gap: 10px; }
+
+.sub { color: var(--color-text-secondary); margin-bottom: 12px; font-size: var(--font-base); }
+.error { color: var(--color-error); margin-bottom: 12px; }
+
+.card {
+  background: var(--color-bg-white);
+  border-radius: var(--radius-card);
+  padding: 24px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-subtle);
+}
+.card h2 { font-size: var(--font-md); font-weight: 600; color: var(--color-text-title); margin-bottom: 12px; }
+
+.empty { color: var(--color-text-secondary); font-size: var(--font-base); }
 .grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
 .ability-chart-wrap {
   width: 100%;
-  border: 1px solid #eef1f5;
+  border: 1px solid var(--color-border);
   border-radius: 12px;
-  background: linear-gradient(180deg, #f9fbff 0%, #ffffff 100%);
+  background: var(--color-bg-white);
   padding: 8px 8px 2px;
   overflow: hidden;
 }
-.ability-chart {
-  width: 100%;
-  height: 290px;
-  display: block;
-}
-.grid-line {
-  stroke: #e8edf5;
-  stroke-width: 1;
-}
-.grid-line.vertical {
-  stroke-dasharray: 4 4;
-}
-.axis-line {
-  stroke: #cdd6e3;
-  stroke-width: 1.2;
-}
-.axis-label {
-  fill: #7b8794;
-  font-size: 11px;
-}
-.y-label {
-  text-anchor: end;
-}
-.x-label {
-  text-anchor: middle;
-}
-.ci-area {
-  fill: rgba(37, 99, 235, 0.16);
-}
-.theta-line {
-  fill: none;
-  stroke: #2563eb;
-  stroke-width: 2.2;
-}
-.theta-point {
-  fill: #2563eb;
-  stroke: #ffffff;
-  stroke-width: 1.5;
-}
+.ability-chart { width: 100%; height: 290px; display: block; }
+
+.grid-line { stroke: var(--color-border); stroke-width: 1; }
+.grid-line.vertical { stroke-dasharray: 4 4; }
+.axis-line { stroke: var(--color-text-secondary); stroke-width: 1.2; }
+.axis-label { fill: var(--color-text-secondary); font-size: 11px; }
+.y-label { text-anchor: end; }
+.x-label { text-anchor: middle; }
+.ci-area { fill: rgba(14, 97, 172, 0.16); }
+.theta-line { fill: none; stroke: var(--color-primary); stroke-width: 2.2; }
+.theta-point { fill: var(--color-primary); stroke: #fff; stroke-width: 1.5; }
+
 .chart-legend {
-  display: flex;
-  gap: 18px;
-  flex-wrap: wrap;
+  display: flex; gap: 18px; flex-wrap: wrap;
   margin: 10px 0 12px;
-  color: #4b5563;
-  font-size: 12px;
+  color: var(--color-text-body); font-size: 12px;
 }
-.chart-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.legend-line {
-  width: 18px;
-  height: 0;
-  border-top: 2px solid #2563eb;
-}
-.legend-area {
-  width: 16px;
-  height: 10px;
-  background: rgba(37, 99, 235, 0.18);
-  border: 1px solid rgba(37, 99, 235, 0.28);
-}
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-line { width: 18px; height: 0; border-top: 2px solid var(--color-primary); }
+.legend-area { width: 16px; height: 10px; background: rgba(14, 97, 172, 0.18); border: 1px solid rgba(14, 97, 172, 0.28); }
+
 .curve-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.curve-item { border: 1px solid #eef1f5; border-radius: 10px; padding: 10px; }
-.curve-head { display: flex; justify-content: space-between; font-size: 13px; color: #444; }
-.curve-ci { font-size: 12px; color: #6b7280; margin-top: 4px; }
+.curve-item { border: 1px solid var(--color-border); border-radius: 10px; padding: 10px; }
+.curve-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--color-text-body); }
+.curve-ci { font-size: 12px; color: var(--color-text-secondary); margin-top: 4px; }
+
 .progress-row { display: grid; grid-template-columns: 160px 1fr 64px; gap: 10px; align-items: center; margin-bottom: 10px; }
-.label { font-size: 13px; color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar-wrap { height: 10px; border-radius: 999px; background: #edf1f5; overflow: hidden; }
-.bar { height: 100%; border-radius: 999px; }
-.bar.green { background: #16a34a; }
-.bar.yellow { background: #f59e0b; }
-.bar.red { background: #ef4444; }
-.value { text-align: right; font-size: 12px; color: #6b7280; }
-.distribution-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #eef1f5; font-size: 13px; }
-.stats { display: grid; gap: 8px; color: #374151; font-size: 14px; }
+.label { font-size: 13px; color: var(--color-text-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-wrap { height: 10px; border-radius: var(--radius-full); background: var(--color-border); overflow: hidden; }
+.bar { height: 100%; border-radius: var(--radius-full); }
+.bar.green { background: var(--color-success); }
+.bar.yellow { background: var(--color-warning); }
+.bar.red { background: var(--color-error); }
+.value { text-align: right; font-size: 12px; color: var(--color-text-secondary); }
+
+.distribution-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--color-border); font-size: 13px; }
+.stats { display: grid; gap: 8px; color: var(--color-text-body); font-size: 14px; }
 
 @media (max-width: 900px) {
-  .sidebar { width: 64px; }
-  .main-content { margin-left: 64px; }
-  .user-info, .quick-nav span:last-child, .logout-btn span:last-child, .user-level { display: none; }
   .grid-two { grid-template-columns: 1fr; }
   .ability-chart { height: 240px; }
   .axis-label { font-size: 10px; }

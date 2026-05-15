@@ -1,74 +1,26 @@
 <template>
-  <div class="mistake-page" :class="{ 'sidebar-collapsed': isSidebarCollapsed }">
-    <!-- 侧边栏 -->
-    <aside class="sidebar">
-      <div class="user-section" @click="goProfile">
-        <div class="user-avatar-large">
-          <img v-if="isImageAvatar(userInfo.avatar)" :src="userInfo.avatar" class="avatar-img" />
-          <span v-else>{{ userInfo.avatar }}</span>
-        </div>
-        <div class="user-info" v-show="!isSidebarCollapsed">
-          <span class="user-name">{{ userInfo.name }}</span>
-          <span class="user-level">错题本</span>
-        </div>
-      </div>
-
-      <button class="toggle-btn" @click.stop="toggleSidebar">
-        {{ isSidebarCollapsed ? '→' : '←' }}
-      </button>
-
-      <div class="quick-nav" v-show="!isSidebarCollapsed">
-        <router-link to="/ai-tutor" class="nav-item">
-          <span class="nav-icon">💬</span><span>AI 提问</span>
-        </router-link>
-        <router-link to="/recommend" class="nav-item">
-          <span class="nav-icon">✨</span><span>智能推荐</span>
-        </router-link>
-        <router-link to="/exercises" class="nav-item">
-          <span class="nav-icon">📝</span><span>练习中心</span>
-        </router-link>
-        <router-link to="/mistake-book" class="nav-item active">
-          <span class="nav-icon">📕</span><span>错题本</span>
-        </router-link>
-        <router-link to="/profile" class="nav-item">
-          <span class="nav-icon">📊</span><span>学习画像</span>
-        </router-link>
-      </div>
-
-      <div class="sidebar-footer" v-show="!isSidebarCollapsed">
-        <button class="logout-btn" @click="logout">
-          <span>🚪</span><span>退出登录</span>
-        </button>
-      </div>
-    </aside>
-
-    <!-- 主内容 -->
-    <main class="main-content">
-      <div class="mobile-header">
-        <button class="mobile-menu-btn" @click="toggleSidebar">☰</button>
-        <span class="mobile-title">📕 错题本</span>
-      </div>
-
+  <AppLayout>
+    <div class="content">
       <!-- ===== 复习模式遮罩 ===== -->
       <div v-if="reviewMode" class="review-overlay">
         <div class="review-modal">
           <!-- 进度 -->
           <div class="review-progress">
-            <button class="btn-exit-review" @click="exitReview">✕ 退出</button>
+            <button class="btn-exit-review" @click="exitReview">退出</button>
             <span class="review-idx">{{ reviewIndex + 1 }} / {{ reviewList.length }}</span>
             <div class="progress-bar">
               <div class="progress-fill" :style="{ width: reviewProgress + '%' }"></div>
             </div>
-            <span class="review-score">✅{{ reviewCorrectCount }} ❌{{ reviewWrongCount }}</span>
+            <span class="review-score">{{ reviewCorrectCount }} / {{ reviewWrongCount }}</span>
           </div>
 
           <!-- 复习完成 -->
           <div v-if="reviewDone" class="review-done">
-            <div class="done-icon">🎉</div>
+            <div class="done-icon"> </div>
             <h2>本轮复习完成！</h2>
             <p>共复习 {{ reviewList.length }} 道错题</p>
-            <p>答对 <strong>{{ reviewCorrectCount }}</strong> 道 · 答错 <strong>{{ reviewWrongCount }}</strong> 道</p>
-            <p v-if="reviewNewMastered > 0" class="done-mastered">🏆 新掌握 {{ reviewNewMastered }} 道题</p>
+            <p>答对 <strong>{{ reviewCorrectCount }}</strong> 道 / 答错 <strong>{{ reviewWrongCount }}</strong> 道</p>
+            <p v-if="reviewNewMastered > 0" class="done-mastered">新掌握 {{ reviewNewMastered }} 道题</p>
             <button class="btn-primary" @click="exitReview">返回错题本</button>
           </div>
 
@@ -83,7 +35,7 @@
                 </span>
                 <span class="badge-error">错误 {{ currentReviewQ.error_count }} 次</span>
                 <span v-if="currentReviewQ.knowledge_points?.length" class="badge-kp">
-                  {{ currentReviewQ.knowledge_points.slice(0, 2).join(' · ') }}
+                  {{ currentReviewQ.knowledge_points.slice(0, 2).join(' / ') }}
                 </span>
               </div>
 
@@ -128,8 +80,8 @@
                       :disabled="reviewGrading || !reviewEssayAnswer.trim()"
                       @click="submitReviewEssay"
                     >
-                      <span v-if="reviewGrading">⏳ AI批改中…</span>
-                      <span v-else>🤖 提交AI批改</span>
+                      <span v-if="reviewGrading">AI批改中…</span>
+                      <span v-else>提交AI批改</span>
                     </button>
                   </div>
                 </div>
@@ -139,20 +91,20 @@
               <template v-else>
                 <!-- 答对 -->
                 <div v-if="reviewResult.isCorrect" class="result-correct">
-                  <div class="result-icon">🎉</div>
+                  <div class="result-icon"> </div>
                   <div class="result-correct-msg">答对了！已标记为掌握</div>
                   <div v-if="reviewResult.feedback" class="result-detail"
                        v-html="renderMath(reviewResult.feedback)"></div>
                   <div class="review-actions">
                     <button class="btn-next" @click="goReviewNext">
-                      {{ isReviewLast ? '查看本轮总结' : '下一题 →' }}
+                      {{ isReviewLast ? '查看本轮总结' : '下一题' }}
                     </button>
                   </div>
                 </div>
 
                 <!-- 答错 -->
                 <div v-else class="result-wrong">
-                  <div class="result-icon">😕</div>
+                  <div class="result-icon"> </div>
                   <div class="result-wrong-msg">
                     <span v-if="reviewResult.chosenKey">你选了 {{ reviewResult.chosenKey }}，</span>答错了
                     <span v-if="reviewResult.correctKey">（正确答案：{{ reviewResult.correctKey }}）</span>
@@ -160,26 +112,26 @@
 
                   <!-- 参考答案 -->
                   <div v-if="currentReviewQ.standard_answer" class="analysis-card">
-                    <div class="analysis-title">📖 参考答案</div>
+                    <div class="analysis-title">参考答案</div>
                     <div class="analysis-body" v-html="renderMath(currentReviewQ.standard_answer)"></div>
                   </div>
 
                   <!-- AI 反馈 -->
                   <div v-if="reviewResult.feedback" class="analysis-card">
-                    <div class="analysis-title">📝 AI 解析</div>
+                    <div class="analysis-title">AI 解析</div>
                     <div class="analysis-body" v-html="renderMath(reviewResult.feedback)"></div>
                   </div>
 
                   <!-- AI 诊断 -->
                   <div v-if="reviewResult.diagnosis" class="diagnosis-card">
-                    <div class="analysis-title">🔍 问题所在</div>
+                    <div class="analysis-title">问题所在</div>
                     <div class="analysis-body" v-html="renderMath(reviewResult.diagnosis)"></div>
                   </div>
-                  <div v-else-if="reviewDiagnosing" class="diagnosis-loading">⏳ AI 正在分析你的问题…</div>
+                  <div v-else-if="reviewDiagnosing" class="diagnosis-loading">AI 正在分析你的问题…</div>
 
                   <div class="review-actions">
                     <button class="btn-next wrong-next" @click="goReviewNext">
-                      {{ isReviewLast ? '查看本轮总结' : '下一题 →' }}
+                      {{ isReviewLast ? '查看本轮总结' : '下一题' }}
                     </button>
                   </div>
                 </div>
@@ -190,36 +142,39 @@
       </div>
 
       <!-- ===== 正常页面内容 ===== -->
-      <div class="page-container" v-show="!reviewMode">
-        <!-- 页头统计 -->
-        <div class="page-header">
-          <div class="header-left">
-            <h1>📕 错题本</h1>
-            <p>巩固薄弱知识点，让每道错题都变成进步的阶梯</p>
+      <div v-show="!reviewMode">
+        <!-- 页头 -->
+        <div class="header-row">
+          <h1>
+            <BookOpen :size="24" />
+            错题本
+          </h1>
+        </div>
+        <p class="sub">巩固薄弱知识点，让每道错题都变成进步的阶梯</p>
+
+        <!-- 统计卡片 -->
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-value">{{ stats.total }}</div>
+            <div class="stat-label">总错题</div>
           </div>
-          <div class="stats-row">
-            <div class="stat-card">
-              <div class="stat-value">{{ stats.total }}</div>
-              <div class="stat-label">总错题</div>
-            </div>
-            <div class="stat-card warn">
-              <div class="stat-value">{{ stats.unmastered }}</div>
-              <div class="stat-label">待掌握</div>
-            </div>
-            <div class="stat-card success">
-              <div class="stat-value">{{ stats.mastered }}</div>
-              <div class="stat-label">已掌握</div>
-            </div>
-            <div class="stat-card due" v-if="stats.due_for_review > 0">
-              <div class="stat-value">{{ stats.due_for_review }}</div>
-              <div class="stat-label">待复习</div>
-            </div>
+          <div class="stat-card warn">
+            <div class="stat-value">{{ stats.unmastered }}</div>
+            <div class="stat-label">待掌握</div>
+          </div>
+          <div class="stat-card success">
+            <div class="stat-value">{{ stats.mastered }}</div>
+            <div class="stat-label">已掌握</div>
+          </div>
+          <div class="stat-card due" v-if="stats.due_for_review > 0">
+            <div class="stat-value">{{ stats.due_for_review }}</div>
+            <div class="stat-label">待复习</div>
           </div>
         </div>
 
         <!-- 复习提醒横幅 -->
         <div v-if="dueItems.length > 0" class="due-banner">
-          <span class="due-icon">⏰</span>
+          <span class="due-icon"> </span>
           <span>有 <strong>{{ dueItems.length }}</strong> 道错题到期待复习</span>
           <button class="btn-review-due" @click="startReview('due')">立即复习</button>
         </div>
@@ -249,7 +204,7 @@
               class="btn-start-review"
               @click="startReview('filtered')"
             >
-              🚀 开始复习 ({{ filteredItems.length }})
+              开始复习 ({{ filteredItems.length }})
             </button>
           </div>
         </div>
@@ -262,7 +217,7 @@
 
         <!-- 空状态 -->
         <div v-else-if="filteredItems.length === 0" class="empty-state">
-          <div class="empty-icon">🎯</div>
+          <div class="empty-icon"> </div>
           <h3>{{ emptyText }}</h3>
           <p v-if="activeFilter === 'all' && !filterKp">继续做题，答错的题目会自动收录到这里</p>
           <router-link v-if="activeFilter === 'all' && !filterKp" to="/recommend" class="btn-go-practice">
@@ -286,11 +241,11 @@
                     {{ diffLabel(item.difficulty) }}
                   </span>
                   <span v-if="item.knowledge_points?.length" class="badge-kp">
-                    {{ item.knowledge_points.slice(0, 2).join(' · ') }}
+                    {{ item.knowledge_points.slice(0, 2).join(' / ') }}
                   </span>
                   <span class="badge-error">错 {{ item.error_count }} 次</span>
-                  <span v-if="item.mastered" class="badge-mastered">✅ 已掌握</span>
-                  <span v-else-if="isDue(item)" class="badge-due">⏰ 待复习</span>
+                  <span v-if="item.mastered" class="badge-mastered">已掌握</span>
+                  <span v-else-if="isDue(item)" class="badge-due">待复习</span>
                 </div>
                 <div class="card-actions">
                   <!-- 展开/收起参考答案 -->
@@ -306,7 +261,7 @@
 
               <transition name="fade">
                 <div v-if="item._expanded" class="card-answer-block">
-                  <div class="answer-label">📖 参考答案</div>
+                  <div class="answer-label">参考答案</div>
                   <div class="answer-content" v-html="renderMath(item.standard_answer || '暂无标准答案')"></div>
                 </div>
               </transition>
@@ -324,21 +279,17 @@
           </transition-group>
         </div>
       </div>
-    </main>
-  </div>
+    </div>
+  </AppLayout>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { BookOpen } from 'lucide-vue-next'
+import AppLayout from '../components/AppLayout.vue'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { learningToolsAPI, advisorAPI, chatAPI } from '../services/apiService.js'
-
-const router = useRouter()
-const isSidebarCollapsed = ref(false)
-
-const userInfo = reactive({ name: '', avatar: '👤' })
 
 const loading = ref(false)
 const items = ref([])
@@ -525,8 +476,6 @@ const formatDate = (isoStr) => {
   return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
 }
 
-const isImageAvatar = (av) => typeof av === 'string' && (av.startsWith('http') || av.startsWith('/'))
-
 // ---------------------------------------------------------------------------
 // 数据加载
 // ---------------------------------------------------------------------------
@@ -650,7 +599,7 @@ const submitReviewEssay = async () => {
       isCorrect,
       chosenKey: null,
       correctKey: null,
-      feedback: `${isCorrect ? '✅' : '❌'} 得分 ${score}：${feedback}`,
+      feedback: `${isCorrect ? '' : ''} 得分 ${score}：${feedback}`,
       diagnosis: null,
     }
 
@@ -748,170 +697,46 @@ const exitReview = () => {
 // 导航
 // ---------------------------------------------------------------------------
 const setFilter = (val) => { activeFilter.value = val }
-const toggleSidebar = () => { isSidebarCollapsed.value = !isSidebarCollapsed.value }
-const goProfile = () => router.push('/profile')
-const logout = () => {
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('user_info')
-  router.push('/login')
-}
 
 // ---------------------------------------------------------------------------
 // 初始化
 // ---------------------------------------------------------------------------
 onMounted(async () => {
-  const raw = localStorage.getItem('user_info')
-  if (raw) {
-    try {
-      const info = JSON.parse(raw)
-      userInfo.name = info.name || info.username || '同学'
-      userInfo.avatar = info.avatar || '👤'
-    } catch {}
-  }
-
   await Promise.all([loadStats(), loadMistakes(), loadDue()])
 })
 </script>
 
 <style scoped>
-/* -------- 布局 -------- */
-.mistake-page {
-  display: flex;
-  min-height: 100vh;
-  background: #f5f7fa;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
+/* === Base (from design system) === */
+.content { padding: 32px; max-width: var(--max-content-width); margin: 0 auto; }
 
-.sidebar {
-  width: 220px;
-  min-height: 100vh;
-  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
-  color: #fff;
-  display: flex;
-  flex-direction: column;
-  padding: 20px 0;
-  transition: width 0.3s;
-  position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 100;
-}
+.header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.header-row h1 { font-size: var(--font-xxl); font-weight: 700; color: var(--color-text-title); display: flex; align-items: center; gap: 10px; }
 
-.sidebar-collapsed .sidebar { width: 60px; }
-.sidebar-collapsed .main-content { margin-left: 60px; }
+.sub { color: var(--color-text-secondary); margin-bottom: 12px; font-size: var(--font-base); }
+.error { color: var(--color-error); margin-bottom: 12px; }
 
-.main-content {
-  margin-left: 220px;
-  flex: 1;
-  transition: margin-left 0.3s;
-  min-height: 100vh;
-}
-
-.user-section {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 16px 20px;
-  cursor: pointer;
-}
-
-.user-avatar-large {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: #e94560;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  flex-shrink: 0;
-}
-
-.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
-
-.user-name { display: block; font-weight: 600; font-size: 14px; }
-.user-level { display: block; font-size: 11px; color: rgba(255,255,255,.6); }
-
-.toggle-btn {
-  background: none;
-  border: none;
-  color: rgba(255,255,255,.5);
-  cursor: pointer;
-  padding: 4px 16px;
-  font-size: 14px;
-  text-align: right;
-  width: 100%;
-}
-
-.quick-nav { padding: 0 8px; flex: 1; }
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  color: rgba(255,255,255,.7);
-  text-decoration: none;
-  font-size: 14px;
-  transition: all 0.2s;
-  margin-bottom: 4px;
-}
-.nav-item:hover { background: rgba(255,255,255,.1); color: #fff; }
-.nav-item.active { background: #e94560; color: #fff; }
-.nav-icon { font-size: 16px; }
-
-.sidebar-footer { padding: 16px; }
-.logout-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: none;
-  border: 1px solid rgba(255,255,255,.2);
-  color: rgba(255,255,255,.7);
-  border-radius: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-  font-size: 13px;
-  width: 100%;
-  transition: all 0.2s;
-}
-.logout-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
-
-.mobile-header {
-  display: none;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  background: #fff;
-  border-bottom: 1px solid #e8ecf0;
-  position: sticky;
-  top: 0;
-  z-index: 50;
-}
-.mobile-menu-btn { background: none; border: none; font-size: 20px; cursor: pointer; }
-.mobile-title { font-weight: 600; font-size: 16px; }
-
-/* -------- 主内容 -------- */
-.page-container {
+.card {
+  background: var(--color-bg-white);
+  border-radius: var(--radius-card);
   padding: 24px;
-  max-width: 960px;
-  margin: 0 auto;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-subtle);
 }
+.card h2 { font-size: var(--font-md); font-weight: 600; color: var(--color-text-title); margin-bottom: 12px; }
 
-/* -------- 页头 -------- */
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-  gap: 16px;
+.empty { color: var(--color-text-secondary); font-size: var(--font-base); }
+
+.btn {
+  border: none; border-radius: var(--radius-base); padding: 8px 16px;
+  background: var(--color-primary); color: #fff; cursor: pointer;
+  font-size: 13px; font-family: var(--font-family); transition: all 0.2s;
 }
+.btn:hover { background: var(--color-primary-hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.header-left h1 { margin: 0 0 4px; font-size: 24px; font-weight: 700; color: #1a1a2e; }
-.header-left p { margin: 0; color: #888; font-size: 14px; }
-
-.stats-row { display: flex; gap: 12px; flex-wrap: wrap; }
+/* === Page-specific: Stats === */
+.stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
 
 .stat-card {
   background: #fff;
@@ -927,7 +752,7 @@ onMounted(async () => {
 .stat-value { font-size: 24px; font-weight: 700; color: #1a1a2e; }
 .stat-label { font-size: 12px; color: #888; margin-top: 2px; }
 
-/* -------- 复习提醒横幅 -------- */
+/* === Page-specific: Due banner === */
 .due-banner {
   display: flex;
   align-items: center;
@@ -955,7 +780,7 @@ onMounted(async () => {
 }
 .btn-review-due:hover { background: #e0a800; }
 
-/* -------- 工具栏 -------- */
+/* === Page-specific: Toolbar === */
 .toolbar {
   display: flex;
   justify-content: space-between;
@@ -994,7 +819,7 @@ onMounted(async () => {
 .kp-select:focus { border-color: #e94560; }
 
 .btn-start-review {
-  background: linear-gradient(135deg, #e94560, #c73652);
+  background: linear-gradient(135deg, #e94560, #0c84a1);
   color: #fff;
   border: none;
   border-radius: 8px;
@@ -1006,7 +831,7 @@ onMounted(async () => {
 }
 .btn-start-review:hover { opacity: 0.9; }
 
-/* -------- 加载 / 空状态 -------- */
+/* === Page-specific: Loading / Empty === */
 .loading-state { text-align: center; padding: 60px 20px; color: #888; }
 .spinner {
   width: 40px;
@@ -1036,7 +861,7 @@ onMounted(async () => {
 }
 .btn-go-practice:hover { opacity: 0.9; }
 
-/* -------- 错题卡片 -------- */
+/* === Page-specific: Mistake cards === */
 .mistake-list { display: flex; flex-direction: column; gap: 12px; }
 
 .mistake-card {
@@ -1127,7 +952,7 @@ onMounted(async () => {
 
 .btn-review-single {
   margin-left: auto;
-  background: linear-gradient(135deg, #e94560, #c73652);
+  background: linear-gradient(135deg, #e94560, #0c84a1);
   color: #fff;
   border: none;
   border-radius: 6px;
@@ -1139,7 +964,7 @@ onMounted(async () => {
 }
 .btn-review-single:hover { opacity: 0.88; }
 
-/* -------- 复习遮罩 -------- */
+/* === Page-specific: Review overlay === */
 .review-overlay {
   position: fixed;
   inset: 0;
@@ -1194,7 +1019,7 @@ onMounted(async () => {
 }
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #e94560, #c73652);
+  background: linear-gradient(90deg, #e94560, #0c84a1);
   border-radius: 3px;
   transition: width 0.4s;
 }
@@ -1213,7 +1038,7 @@ onMounted(async () => {
   overflow-x: auto;
 }
 
-/* 选择题 */
+/* Choice */
 .choice-area { display: flex; flex-direction: column; gap: 8px; }
 .choice-btn {
   display: flex;
@@ -1247,7 +1072,7 @@ onMounted(async () => {
 .choice-btn.selected .choice-key { background: #e94560; color: #fff; }
 .choice-text { flex: 1; line-height: 1.6; }
 
-/* 大题 */
+/* Essay */
 .essay-area { display: flex; flex-direction: column; gap: 8px; }
 .review-textarea {
   width: 100%;
@@ -1263,7 +1088,7 @@ onMounted(async () => {
 }
 .review-textarea:focus { border-color: #e94560; }
 
-/* 操作按钮区 */
+/* Review actions */
 .review-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
 
 .btn-confirm {
@@ -1303,9 +1128,9 @@ onMounted(async () => {
   transition: opacity 0.2s;
 }
 .btn-next:hover { opacity: 0.85; }
-.btn-next.wrong-next { background: linear-gradient(135deg, #e94560, #c73652); }
+.btn-next.wrong-next { background: linear-gradient(135deg, #e94560, #0c84a1); }
 
-/* 结果区 */
+/* Result area */
 .result-correct, .result-wrong {
   display: flex;
   flex-direction: column;
@@ -1356,7 +1181,7 @@ onMounted(async () => {
   padding: 8px;
 }
 
-/* 复习完成 */
+/* Review done */
 .review-done { text-align: center; padding: 20px 0; }
 .done-icon { font-size: 60px; margin-bottom: 12px; }
 .review-done h2 { margin: 0 0 8px; color: #1a1a2e; }
@@ -1364,7 +1189,7 @@ onMounted(async () => {
 .done-mastered { color: #065f46 !important; font-weight: 600; }
 .btn-primary {
   margin-top: 20px;
-  background: linear-gradient(135deg, #e94560, #c73652);
+  background: linear-gradient(135deg, #e94560, #0c84a1);
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -1376,7 +1201,7 @@ onMounted(async () => {
 }
 .btn-primary:hover { opacity: 0.9; }
 
-/* -------- 过渡动画 -------- */
+/* === Transitions === */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.25s, transform 0.25s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(-6px); }
 
@@ -1385,13 +1210,9 @@ onMounted(async () => {
 .list-enter-from { opacity: 0; transform: translateY(10px); }
 .list-leave-to { opacity: 0; transform: translateX(-10px); }
 
-/* -------- 响应式 -------- */
+/* === Responsive === */
 @media (max-width: 768px) {
-  .sidebar { display: none; }
-  .main-content { margin-left: 0; }
-  .mobile-header { display: flex; }
-  .page-container { padding: 16px; }
-  .page-header { flex-direction: column; }
+  .content { padding: 16px; }
   .stats-row { justify-content: space-between; }
   .toolbar { flex-direction: column; align-items: flex-start; }
   .toolbar-right { width: 100%; }

@@ -138,6 +138,18 @@ const router = createRouter({
       name: 'mistake-book',
       component: () => import('../pages/MistakeBookView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/grading',
+      name: 'grading',
+      component: () => import('../pages/GradingView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/grading/report/:sessionId',
+      name: 'grading-report',
+      component: () => import('../pages/GradingReportView.vue'),
+      meta: { requiresAuth: true }
     }
   ]
 })
