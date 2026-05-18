@@ -70,6 +70,10 @@ build/
 .DS_Store
 Thumbs.db
 
+# Evaluation results & reports (generated, not committed)
+backend/evaluation/results/
+docs/evaluation_reports/
+
 # Temporary files
 *.tmp
 *.temp
