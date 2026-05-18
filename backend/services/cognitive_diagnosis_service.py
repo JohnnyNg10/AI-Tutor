@@ -115,8 +115,11 @@ class CognitiveDiagnosisService:
         # 需求1：处理连击状态并获取UI效果
         streak_result = self.streak_handler.process_answer(user_id, is_correct, theta)
         
+        # 记录能力历史快照
+        await self._record_ability_snapshot(db, user_id, theta_info)
+
         await db.commit()
-        
+
         return {
             'p_known': p_known_new,
             'p_known_change': p_known_new - p_known_old,
@@ -128,6 +131,41 @@ class CognitiveDiagnosisService:
             'should_trigger_effect': streak_result['should_trigger_effect']
         }
     
+    async def _record_ability_snapshot(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        theta_info: Dict[str, float]
+    ) -> None:
+        """记录能力历史快照，为前端能力曲线图提供真实数据"""
+        stmt = select(UserKnowledgeMastery).where(
+            UserKnowledgeMastery.user_id == user_id
+        )
+        result = await db.execute(stmt)
+        mastery_list = result.scalars().all()
+
+        avg_mastery = (sum(m.p_known or 0 for m in mastery_list) / len(mastery_list)
+                       if mastery_list else 0.0)
+        weak_kp_count = sum(1 for m in mastery_list if (m.p_known or 0) < 0.4)
+
+        profile_result = await db.execute(
+            select(UserProfile).where(UserProfile.user_id == user_id)
+        )
+        profile = profile_result.scalar_one_or_none()
+
+        snapshot = UserAbilityHistory(
+            user_id=user_id,
+            theta=theta_info['theta'],
+            theta_se=theta_info.get('theta_se'),
+            theta_ci_lower=theta_info.get('ci_lower'),
+            theta_ci_upper=theta_info.get('ci_upper'),
+            avg_mastery=round(avg_mastery, 4),
+            weak_kp_count=weak_kp_count,
+            total_questions=profile.total_questions if profile else 0,
+            correct_count=profile.correct_count if profile else 0,
+        )
+        db.add(snapshot)
+
     async def estimate_theta(
         self,
         db: AsyncSession,
@@ -278,12 +316,11 @@ class CognitiveDiagnosisService:
     
     def get_mastery_level(self, p_known: float) -> str:
         """
-        获取掌握度等级
-        
-        PRD标准：
-        - mastered: P(L) >= 0.8 (绿色)
-        - learning: 0.5 <= P(L) < 0.8 (黄色)
-        - weak: P(L) < 0.5 (红色)
+        获取四级掌握度等级
+        - mastered:   P(L) >= 0.85
+        - proficient: 0.65 <= P(L) < 0.85
+        - qualified:  0.4 <= P(L) < 0.65
+        - weak:       P(L) < 0.4
         """
         return self.bkt.get_mastery_level(p_known)
     
@@ -305,20 +342,22 @@ class CognitiveDiagnosisService:
         result = await db.execute(stmt)
         mastery_list = result.scalars().all()
         
-        # 统计各等级知识点数量
-        mastered_count = sum(1 for m in mastery_list if (m.p_known or 0) >= 0.8)
-        learning_count = sum(1 for m in mastery_list if 0.5 <= (m.p_known or 0) < 0.8)
-        weak_count = sum(1 for m in mastery_list if (m.p_known or 0) < 0.5)
-        
+        # 统计四级掌握度
+        mastered_count = sum(1 for m in mastery_list if (m.p_known or 0) >= 0.85)
+        proficient_count = sum(1 for m in mastery_list if 0.65 <= (m.p_known or 0) < 0.85)
+        qualified_count = sum(1 for m in mastery_list if 0.4 <= (m.p_known or 0) < 0.65)
+        weak_count = sum(1 for m in mastery_list if (m.p_known or 0) < 0.4)
+
         # 推荐难度范围
         diff_min, diff_max = self.get_recommended_difficulty_range(theta_info['theta'])
-        
+
         return {
             'user_id': user_id,
             'ability': theta_info,
             'mastery_distribution': {
                 'mastered': mastered_count,
-                'learning': learning_count,
+                'proficient': proficient_count,
+                'qualified': qualified_count,
                 'weak': weak_count,
                 'total': len(mastery_list)
             },
@@ -364,3 +403,31 @@ async def compute_actual_score(
     return await cognitive_service.calculate_actual_score(
         is_correct, hint_level, time_spent, expected_time, skip_reason
     )
+
+
+async def get_user_mastery_dict(
+    db: AsyncSession,
+    user_id: int
+) -> Dict[str, float]:
+    """
+    获取用户所有知识点的掌握度，返回 {kp_name: p_known}
+
+    用于技能树、掌握度可视化等需要批量查询的场景
+    """
+    from sqlalchemy.orm import joinedload
+
+    stmt = (
+        select(UserKnowledgeMastery)
+        .where(UserKnowledgeMastery.user_id == user_id)
+        .options(joinedload(UserKnowledgeMastery.knowledge_point))
+    )
+    result = await db.execute(stmt)
+    mastery_list = result.unique().scalars().all()
+
+    mastery_dict = {}
+    for m in mastery_list:
+        if m.knowledge_point:
+            name = m.knowledge_point.name
+            mastery_dict[name] = m.p_known or 0.5
+
+    return mastery_dict

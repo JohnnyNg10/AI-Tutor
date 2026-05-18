@@ -2,12 +2,12 @@ from fastapi import APIRouter
 from api import (
     auth, chat, profile, upload, records, rag, questions,
     learning_tools, advisor, cognitive_diagnosis, knowledge_tree_progress,
-    six_dimensional_ability,
+    six_dimensional_ability, ocr,
     # V3 需求相关 API (需求 #1-10)
     ab_testing, mastery_visualization, ranking, six_dim_v2,
     review, pitfall_achievement, error_classification, favorite_insight,
     calculation_error, daily_completion, skip, seen_questions, session,
-    knowledge_graph, learning_habit_badges,
+    learning_habit_badges,
 )
 
 api_router = APIRouter()
@@ -45,4 +45,5 @@ api_router.include_router(calculation_error.router)              # 计算失误
 api_router.include_router(daily_completion.router)               # 每日完课
 api_router.include_router(seen_questions.router)                 # 已做题目标记
 api_router.include_router(session.router)                        # Session管理
-api_router.include_router(knowledge_graph.router)               # 知识图谱
+api_router.include_router(ocr.router)                            # OCR手写识别
+# knowledge_graph router removed — data source migrated to skill_tree.py

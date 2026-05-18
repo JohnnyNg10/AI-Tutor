@@ -296,8 +296,12 @@ async def get_advisor_recommendations(
     weak_kp_count = int(profile_dict.get("weak_kp_count") or 0)
 
     advisor_mode = _determine_advisor_mode(avg_mastery, weak_kp_count)
+    instruction = _build_instruction(advisor_mode, weak_kps, theta)
 
-    # --- Step 9: 组装返回 ---
+    # --- Step 9: 组装学习目标 ---
+    learning_goal = _build_learning_goal(advisor_mode, weak_kps, theta, len(due_review_ids))
+
+    # --- Step 10: 组装返回 ---
     result_list = []
 
     for q in final_review:
@@ -320,7 +324,8 @@ async def get_advisor_recommendations(
     return {
         "recommendations": result_list,
         "advisor_mode": advisor_mode,
-        "advisor_instruction": _build_instruction(advisor_mode, weak_kps, theta),
+        "advisor_instruction": instruction,
+        "learning_goal": learning_goal,
         "profile_snapshot": {
             "theta": round(theta, 3),
             "avg_mastery": round(avg_mastery, 3),
@@ -394,6 +399,36 @@ def _build_instruction(mode: str, weak_kps: List[str], theta: float) -> Dict:
     }
 
 
+def _build_learning_goal(
+    mode: str, weak_kps: List[str], theta: float, review_count: int
+) -> Dict:
+    """构建本轮学习目标"""
+    focus_kps = weak_kps[:3] if weak_kps else ["综合练习"]
+    focus_text = "、".join(focus_kps)
+
+    if mode == "MODE_SCAFFOLD":
+        goal_type = "重点攻克"
+        goal_desc = f"本节重点学习：{focus_text}。我会逐步引导你，确保每个知识点都真正理解。"
+        estimated_questions = 5
+    elif mode == "MODE_CHALLENGE":
+        goal_type = "拓展拔高"
+        goal_desc = f"你的基础很扎实！本节挑战：{focus_text}。试试独立完成更高难度的题目。"
+        estimated_questions = 3
+    else:
+        goal_type = "巩固提升"
+        goal_desc = f"本节巩固：{focus_text}。遇到困难随时使用提示按钮，我会帮你理清思路。"
+        estimated_questions = 5
+
+    return {
+        "goal_type": goal_type,
+        "description": goal_desc,
+        "focus_knowledge_points": focus_kps,
+        "estimated_questions": estimated_questions,
+        "review_count": review_count,
+        "advisor_mode": mode,
+    }
+
+
 def _build_recommendation_item(
     q: Question,
     theta: float,
@@ -437,6 +472,7 @@ def _build_recommendation_item(
         "standard_answer": q.standard_answer,   # 选择题前端判题用
         "is_review": is_review,
         "advisor_mode": advisor_mode,
+        "hints_available": True,
         "scores": {
             "final_score": round(final_score, 4),
             "kp_relevance": round(kp_rel, 4),
