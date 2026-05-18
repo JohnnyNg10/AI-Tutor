@@ -1,9 +1,11 @@
-import './assets/base.css'
+import './styles/design-tokens.css'
 import { createApp } from 'vue'
 import App from './App.vue'
-import router, { setupAuthSessionMonitor } from './router'  // 导入路由配置
+import router, { setupAuthSessionMonitor } from './router'
+import { initAnalytics } from './services/analytics'
 
-const app = createApp(App)     // 创建应用
-app.use(router)                // 使用路由（关键！）
-setupAuthSessionMonitor(router) // 启动登录会话过期自动退出监控
-app.mount('#app')              // 挂载到页面上
+const app = createApp(App)
+app.use(router)
+setupAuthSessionMonitor(router)
+initAnalytics(router)
+app.mount('#app')
