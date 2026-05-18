@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from api import (
     auth, chat, profile, upload, records, rag, questions,
     learning_tools, advisor, cognitive_diagnosis, knowledge_tree_progress,
-    six_dimensional_ability, ocr, analytics,
+    six_dimensional_ability, ocr, analytics, grading,
     # V3 需求相关 API (需求 #1-10)
     ab_testing, mastery_visualization, ranking, six_dim_v2,
     review, pitfall_achievement, error_classification, favorite_insight,
@@ -47,4 +47,5 @@ api_router.include_router(seen_questions.router)                 # 已做题目�
 api_router.include_router(session.router)                        # Session管理
 api_router.include_router(ocr.router)                            # OCR手写识别
 api_router.include_router(analytics.router)                      # 数据埋点
+api_router.include_router(grading.router)                        # AI批改
 # knowledge_graph router removed — data source migrated to skill_tree.py

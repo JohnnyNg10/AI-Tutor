@@ -291,6 +291,47 @@ CREATE TABLE IF NOT EXISTS `user_soft_labels` (
   CONSTRAINT `fk_softlabel_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- AI批改会话表
+CREATE TABLE IF NOT EXISTS `grading_sessions` (
+  `id` VARCHAR(36) NOT NULL,
+  `user_id` INT NOT NULL,
+  `title` VARCHAR(200) DEFAULT '未命名批改',
+  `question_count` INT DEFAULT 0,
+  `avg_score` FLOAT DEFAULT 0.0,
+  `total_time_spent` INT DEFAULT 0,
+  `status` VARCHAR(20) DEFAULT 'uploading',
+  `error_distribution` JSON DEFAULT NULL,
+  `weakest_kps` JSON DEFAULT NULL,
+  `strongest_kps` JSON DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_grading_user` (`user_id`),
+  KEY `idx_grading_status` (`status`),
+  CONSTRAINT `fk_grading_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- AI批改题目明细表
+CREATE TABLE IF NOT EXISTS `grading_questions` (
+  `id` VARCHAR(36) NOT NULL,
+  `session_id` VARCHAR(36) NOT NULL,
+  `question_index` INT DEFAULT 0,
+  `question_text` TEXT DEFAULT NULL,
+  `student_answer` TEXT DEFAULT NULL,
+  `ocr_raw_text` TEXT DEFAULT NULL,
+  `ocr_corrections` JSON DEFAULT NULL,
+  `grading_result` JSON DEFAULT NULL,
+  `is_correct` TINYINT(1) DEFAULT NULL,
+  `score` FLOAT DEFAULT 0.0,
+  `error_type` VARCHAR(50) DEFAULT NULL,
+  `error_tags` JSON DEFAULT NULL,
+  `knowledge_points` JSON DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_gq_session` (`session_id`),
+  CONSTRAINT `fk_gq_session` FOREIGN KEY (`session_id`) REFERENCES `grading_sessions` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 初始化知识点数据（对齐 skill_tree.py 83节点知识图谱）
 -- 专题1: 数列基础 (8)
 INSERT INTO `knowledge_points` (`name`, `description`, `parent_id`, `level`) VALUES
