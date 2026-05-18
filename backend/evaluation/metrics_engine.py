@@ -37,21 +37,48 @@ class MetricsEngine:
 
     # ── 推荐质量维度 ──────────────────────────────────────
 
+    def _get_actions(self, result: Dict) -> list:
+        """从多种可能字段中提取 actions"""
+        actions = result.get("_raw_actions", [])
+        if not actions:
+            actions = result.get("actions", [])
+        if not actions:
+            # 从 feedbacks 重建
+            feedbacks = result.get("_raw_feedbacks", result.get("feedbacks", []))
+            actions = [{"is_correct": f.get("is_correct", False), "hint_count": f.get("hint_count", 0)}
+                       for f in feedbacks]
+        return actions
+
+    def _get_recommendations(self, result: Dict) -> list:
+        """从多种可能字段中提取 recommendations"""
+        recs = result.get("_raw_recommendations", result.get("recommendations", []))
+        # 如果 recs 是单个 dict，包装成列表
+        if isinstance(recs, dict):
+            recs = [recs]
+        return recs
+
+    def _extract_question_items(self, recs: list) -> list:
+        """从推荐数据中提取题目列表（适配多种API返回格式）"""
+        items = []
+        for r in recs:
+            if isinstance(r, dict):
+                # 可能的 key: recommendations / questions / items
+                inner = r.get("recommendations", r.get("questions", r.get("items", [])))
+                if isinstance(inner, list):
+                    items.extend(inner)
+                elif isinstance(inner, dict):
+                    items.append(inner)
+        return items
+
     def calc_difficulty_match(self, result: Dict) -> MetricResult:
         """难度匹配度：推荐难度与用户 θ 的偏差"""
         theta_snap = result.get("theta_trajectory", [])
-        # 从 recommendations 提取题目难度
-        recs = result.get("_raw_recommendations", [])
-        diffs = []
-        for r in recs:
-            items = r.get("questions", r.get("items", []))
-            for item in items:
-                d = item.get("difficulty")
-                if d is not None:
-                    diffs.append(d)
+        recs = self._get_recommendations(result)
+        items = self._extract_question_items(recs)
+        diffs = [it.get("difficulty") for it in items if it.get("difficulty") is not None]
 
         if not theta_snap or not diffs:
-            return MetricResult("难度匹配度", "推荐质量", "L2", -1, 0.8, 1.5, "unknown", "数据不足")
+            return MetricResult("难度匹配度", "推荐质量", "L2", -1, 0.8, 1.5, "unknown", "推荐数据未含difficulty字段")
 
         theta = sum(theta_snap) / len(theta_snap) if theta_snap else 0
         deviations = [abs(d - theta) for d in diffs[:len(theta_snap)]]
@@ -65,32 +92,21 @@ class MetricsEngine:
             threshold_good=0.8,
             threshold_warn=1.5,
             status="good" if avg_dev <= 0.8 else ("warn" if avg_dev <= 1.5 else "critical"),
-            detail=f"平均偏差={avg_dev:.2f}, θ={theta:.2f}",
+            detail=f"平均偏差={avg_dev:.2f}, theta={theta:.2f}",
         )
 
     def calc_coverage_rate(self, result: Dict) -> MetricResult:
-        """知识点覆盖率：推荐命中薄弱KP的比例"""
-        profile_id = result.get("profile_id", "")
-        recs = result.get("_raw_recommendations", [])
-        if not recs:
+        """知识点覆盖率：推荐去重题目数"""
+        recs = self._get_recommendations(result)
+        items = self._extract_question_items(recs)
+        if not items:
             return MetricResult("知识点覆盖率", "推荐质量", "L3", -1, 0.6, 0.3, "unknown", "无推荐数据")
 
-        # 统计推荐的知识点
-        all_kps = set()
-        for r in recs:
-            items = r.get("questions", r.get("items", []))
-            for item in items:
-                kps = item.get("knowledge_points", item.get("kp_list", []))
-                all_kps.update(kps)
-
-        # 简化: 用推荐去重题目数 / 预期覆盖数
         unique_qs = set()
-        for r in recs:
-            items = r.get("questions", r.get("items", []))
-            for item in items:
-                qid = item.get("question_id") or item.get("id")
-                if qid:
-                    unique_qs.add(qid)
+        for item in items:
+            qid = item.get("question_id") or item.get("id")
+            if qid:
+                unique_qs.add(qid)
 
         coverage = len(unique_qs) / max(30, len(unique_qs) * 2) if unique_qs else 0
         coverage = min(1.0, coverage)
@@ -109,16 +125,16 @@ class MetricsEngine:
     # ── 教学效果维度 ──────────────────────────────────────
 
     def calc_hint_effectiveness(self, result: Dict) -> MetricResult:
-        """提示有效率：查看提示后下一题答对的概率"""
-        actions = result.get("_raw_actions", [])
-        if not actions:
-            # 从 feedbacks 推断
-            feedbacks = result.get("feedbacks", [])
-            actions = [{"hint_count": f.get("hint_count", 0), "is_correct": f.get("is_correct", False)}
-                       for f in feedbacks]
-
+        """提示有效率：查看提示后答对的概率"""
+        actions = self._get_actions(result)
         hinted = [a for a in actions if a.get("hint_count", 0) > 0]
         if not hinted:
+            # 从原始 feedbacks 判断
+            raw_fbs = result.get("_raw_feedbacks", result.get("feedbacks", []))
+            if raw_fbs:
+                fb_hinted = [f for f in raw_fbs if f.get("hint_count", 0) > 0]
+                if not fb_hinted:
+                    return MetricResult("提示有效率", "教学效果", "L2", 0, 0.55, 0.35, "good", "无提示使用(可能独立解题)")
             return MetricResult("提示有效率", "教学效果", "L2", -1, 0.55, 0.35, "unknown", "无提示使用记录")
 
         hinted_correct = sum(1 for a in hinted if a.get("is_correct", False))
@@ -224,13 +240,24 @@ class MetricsEngine:
 
     # ── 用户体验维度 ──────────────────────────────────────
 
+    def _get_feedbacks(self, result: Dict) -> list:
+        """从多种可能字段中提取 feedbacks"""
+        fbs = result.get("_raw_feedbacks", [])
+        if not fbs:
+            fbs = result.get("feedbacks", [])
+        return fbs
+
     def calc_completion_rate(self, result: Dict) -> MetricResult:
         """会话完成率：有效产出会话比例"""
         actions = result.get("actions_count", 0)
         feedbacks = result.get("feedbacks_count", 0)
 
+        if actions == 0 and feedbacks == 0:
+            actions = len(self._get_actions(result))
+            feedbacks = len(self._get_feedbacks(result))
+
         if actions == 0:
-            return MetricResult("会话完成率", "用户体验", "L3", 0, 0.85, 0.7, "critical", "无操作")
+            return MetricResult("会话完成率", "用户体验", "L3", 0, 0.85, 0.7, "critical", "无操作记录")
 
         rate = feedbacks / actions if actions > 0 else 0
         return MetricResult(
@@ -248,14 +275,14 @@ class MetricsEngine:
 
     def calc_mode_switch_reasonableness(self, result: Dict) -> MetricResult:
         """模式切换合理性：切换后正确率变化"""
-        feedbacks = result.get("feedbacks", [])
-        if len(feedbacks) < 15:
-            return MetricResult("模式切换合理性", "个性化", "L2", -1, 0, -0.2, "unknown", "数据不足")
+        feedbacks = self._get_feedbacks(result)
+        if len(feedbacks) < 10:
+            return MetricResult("模式切换合理性", "个性化", "L2", -1, 0, -0.2, "unknown", f"数据不足({len(feedbacks)}条)")
 
-        # 简化：对比前后半段正确率
+        # 对比前后半段正确率
         mid = len(feedbacks) // 2
-        first_half = sum(1 for f in feedbacks[:mid] if f.get("is_correct")) / mid
-        second_half = sum(1 for f in feedbacks[mid:] if f.get("is_correct")) / (len(feedbacks) - mid)
+        first_half = sum(1 for f in feedbacks[:mid] if f.get("is_correct")) / max(mid, 1)
+        second_half = sum(1 for f in feedbacks[mid:] if f.get("is_correct")) / max(len(feedbacks) - mid, 1)
         delta = second_half - first_half
 
         return MetricResult(
@@ -266,19 +293,14 @@ class MetricsEngine:
             threshold_good=0,
             threshold_warn=-0.2,
             status="good" if delta >= 0 else ("warn" if delta >= -0.2 else "critical"),
-            detail=f"前半={first_half:.0%}, 后半={second_half:.0%}, Δ={delta:+.0%}",
+            detail=f"前半={first_half:.0%}, 后半={second_half:.0%}, delta={delta:+.0%}",
         )
 
     def calc_difficulty_smoothness(self, result: Dict) -> MetricResult:
         """难度递进平滑度：逐题难度变化幅度"""
-        recs = result.get("_raw_recommendations", [])
-        diffs = []
-        for r in recs:
-            items = r.get("questions", r.get("items", []))
-            for item in items:
-                d = item.get("difficulty")
-                if d is not None:
-                    diffs.append(d)
+        recs = self._get_recommendations(result)
+        items = self._extract_question_items(recs)
+        diffs = [it.get("difficulty") for it in items if it.get("difficulty") is not None]
 
         if len(diffs) < 4:
             return MetricResult("难度递进平滑度", "个性化", "L3", -1, 1.2, 2.0, "unknown", "推荐数据不足")

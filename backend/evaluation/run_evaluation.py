@@ -20,6 +20,10 @@ import json
 import os
 import sys
 import time
+
+# 修复 Windows GBK 控制台编码问题
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

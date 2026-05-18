@@ -43,6 +43,27 @@ class SimulationResult:
     total_time_ms: float = 0
 
     def to_dict(self) -> dict:
+        # 序列化 actions
+        raw_actions = []
+        for a in self.actions:
+            raw_actions.append({
+                "is_correct": a.is_correct,
+                "hint_count": a.hint_count,
+                "hint_levels": a.hint_levels,
+                "time_spent": a.time_spent,
+                "skip_reason": a.skip_reason,
+                "attempts": a.attempts,
+            })
+        # 序列化 feedbacks (保留所有字段)
+        raw_feedbacks = []
+        for f in self.feedbacks:
+            raw_feedbacks.append({
+                "is_correct": f.get("is_correct", False),
+                "hint_count": f.get("hint_count", 0),
+                "avg_mastery": f.get("avg_mastery") or f.get("mastery") or 0,
+                "theta": f.get("theta") or f.get("theta_estimate") or 0,
+            })
+
         return {
             "profile_id": self.profile_id,
             "trajectory_id": self.trajectory_id,
@@ -53,8 +74,12 @@ class SimulationResult:
             "theta_trajectory": self.theta_snapshots,
             "mastery_trajectory": self.mastery_snapshots,
             "error_count": len(self.errors),
-            "errors": self.errors[-5:],  # 只保留最后5条
+            "errors": self.errors[-5:],
             "total_time_ms": self.total_time_ms,
+            # 原始数据供指标计算
+            "_raw_actions": raw_actions,
+            "_raw_recommendations": self.recommendations,
+            "_raw_feedbacks": raw_feedbacks,
         }
 
 
@@ -130,24 +155,31 @@ class APISimulator:
 
     async def submit_feedback(
         self, result: SimulationResult, question_id: int, action: AnswerAction
-    ) -> Optional[Dict]:
-        """提交答题反馈"""
-        resp = await self.client.post(
-            "/advisor/feedback",
-            json={
-                "question_id": question_id,
-                "is_correct": action.is_correct,
-                "hint_count": action.hint_count,
-                "time_spent": action.time_spent,
-                "skip_reason": action.skip_reason,
-                "algorithm_version": "advisor-v1",
-            },
-            headers=self._auth_headers(result.access_token),
-        )
-        if resp.status_code != 200:
-            result.errors.append(f"反馈失败(q={question_id}): {resp.status_code}")
-            return None
-        return resp.json().get("data", {})
+    ) -> Dict:
+        """提交答题反馈，始终返回包含 is_correct 的字典"""
+        base = {"is_correct": action.is_correct, "hint_count": action.hint_count}
+        try:
+            resp = await self.client.post(
+                "/advisor/feedback",
+                json={
+                    "question_id": question_id,
+                    "is_correct": action.is_correct,
+                    "hint_count": action.hint_count,
+                    "time_spent": action.time_spent,
+                    "skip_reason": action.skip_reason,
+                    "algorithm_version": "advisor-v1",
+                },
+                headers=self._auth_headers(result.access_token),
+            )
+            if resp.status_code != 200:
+                result.errors.append(f"反馈失败(q={question_id}): {resp.status_code}")
+                return base
+            data = resp.json().get("data", {}) or {}
+            # 合并 API 返回的 theta/mastery 与 ground truth
+            return {**base, **data}
+        except Exception as e:
+            result.errors.append(f"反馈异常(q={question_id}): {e}")
+            return base
 
     async def get_profile_snapshot(self, result: SimulationResult) -> Optional[Dict]:
         """获取画像快照"""
@@ -186,35 +218,42 @@ class APISimulator:
         actions = generator.generate(trajectory_type, difficulties)
         result.actions = actions
 
-        # 3. 逐题：获取推荐 → 模拟答题 → 提交反馈
+        # 3. 起始画像快照
+        init_snapshot = await self.get_profile_snapshot(result)
+        if init_snapshot:
+            theta_init = init_snapshot.get("theta")
+            if theta_init is not None:
+                result.theta_snapshots.append(float(theta_init))
+            mastery_init = init_snapshot.get("avg_mastery")
+            if mastery_init is not None:
+                result.mastery_snapshots.append(float(mastery_init))
+
+        # 4. 逐题：获取推荐 → 模拟答题 → 提交反馈
         for i, action in enumerate(actions):
             # 获取推荐
             rec = await self.get_recommendation(result)
             if rec:
                 result.recommendations.append(rec)
-                # 取第一道推荐题
-                questions = rec.get("questions", [])
+                # 取第一道推荐题（API 返回 "recommendations" 而非 "questions"）
+                questions = rec.get("recommendations", rec.get("questions", []))
                 if questions:
                     q = questions[0]
                     q_id = q.get("question_id") or q.get("id")
                     if q_id:
-                        # 提交反馈
+                        # 提交反馈（始终记录）
                         fb = await self.submit_feedback(result, int(q_id), action)
-                        if fb:
-                            result.feedbacks.append(fb)
-                            # 记录 theta 和 mastery 快照
-                            theta = fb.get("theta") or fb.get("theta_estimate")
-                            if theta is not None:
-                                result.theta_snapshots.append(float(theta))
-                            mastery = fb.get("avg_mastery")
-                            if mastery is not None:
-                                result.mastery_snapshots.append(float(mastery))
+                        result.feedbacks.append(fb)
 
             # 每 5 题获取一次画像快照
             if i % 5 == 4:
                 snapshot = await self.get_profile_snapshot(result)
-                if snapshot and not result.theta_snapshots:
-                    result.theta_snapshots.append(float(snapshot.get("theta", 0)))
+                if snapshot:
+                    theta = snapshot.get("theta")
+                    if theta is not None:
+                        result.theta_snapshots.append(float(theta))
+                    mastery = snapshot.get("avg_mastery")
+                    if mastery is not None:
+                        result.mastery_snapshots.append(float(mastery))
 
         result.total_time_ms = (time.time() - t0) * 1000
         return result
