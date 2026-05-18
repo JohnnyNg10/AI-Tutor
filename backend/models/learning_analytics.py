@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON, Float, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON, Float, Numeric, UniqueConstraint, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 
@@ -88,6 +88,9 @@ class UserInteractionLog(Base):
     difficulty = Column(Integer, nullable=True)
     content = Column(Text, nullable=True)
     interaction_metadata = Column("metadata", JSON, nullable=True)
+    event_name = Column(String(80), nullable=True)
+    soft_label_dimension = Column(String(30), nullable=True)
+    cognitive_signal = Column(JSON, nullable=True)
 
     sentiment_tag = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
@@ -98,4 +101,31 @@ class UserInteractionLog(Base):
     __table_args__ = (
         Index("idx_user_time", "user_id", "created_at"),
         Index("idx_session", "session_id"),
+        Index("idx_event_name", "event_name"),
+    )
+
+
+class UserSoftLabel(Base):
+    """六维软标签评分（每日更新）"""
+    __tablename__ = "user_soft_labels"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    independence_score = Column(Numeric(5, 2), default=50.00)
+    persistence_score = Column(Numeric(5, 2), default=50.00)
+    metacognition_score = Column(Numeric(5, 2), default=50.00)
+    helpseeking_score = Column(Numeric(5, 2), default=50.00)
+    reflection_score = Column(Numeric(5, 2), default=50.00)
+    transfer_score = Column(Numeric(5, 2), default=50.00)
+    composite_score = Column(Numeric(5, 2), default=50.00)
+    sample_size = Column(Integer, default=0)
+    calculated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uk_user"),
+        Index("idx_composite", "composite_score"),
     )

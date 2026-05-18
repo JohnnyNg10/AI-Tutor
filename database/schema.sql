@@ -257,13 +257,38 @@ CREATE TABLE IF NOT EXISTS `user_interaction_logs` (
   `difficulty` INT DEFAULT NULL,
   `content` TEXT DEFAULT NULL,
   `metadata` JSON DEFAULT NULL,
+  `event_name` VARCHAR(80) DEFAULT NULL,
+  `soft_label_dimension` VARCHAR(30) DEFAULT NULL,
+  `cognitive_signal` JSON DEFAULT NULL,
   `sentiment_tag` VARCHAR(20) DEFAULT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_user_time` (`user_id`, `created_at`),
   KEY `idx_session` (`session_id`),
+  KEY `idx_event_name` (`event_name`),
   CONSTRAINT `fk_interaction_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_interaction_question` FOREIGN KEY (`question_id`) REFERENCES `questions` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 用户软标签评分表（六维 Soft Label）
+CREATE TABLE IF NOT EXISTS `user_soft_labels` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `user_id` INT NOT NULL,
+  `independence_score` DECIMAL(5,2) DEFAULT 50.00,
+  `persistence_score` DECIMAL(5,2) DEFAULT 50.00,
+  `metacognition_score` DECIMAL(5,2) DEFAULT 50.00,
+  `helpseeking_score` DECIMAL(5,2) DEFAULT 50.00,
+  `reflection_score` DECIMAL(5,2) DEFAULT 50.00,
+  `transfer_score` DECIMAL(5,2) DEFAULT 50.00,
+  `composite_score` DECIMAL(5,2) DEFAULT 50.00,
+  `sample_size` INT DEFAULT 0,
+  `calculated_at` DATETIME DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user` (`user_id`),
+  KEY `idx_composite` (`composite_score`),
+  CONSTRAINT `fk_softlabel_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 初始化知识点数据（对齐 skill_tree.py 83节点知识图谱）

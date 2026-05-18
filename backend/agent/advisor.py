@@ -290,12 +290,14 @@ async def get_advisor_recommendations(
         extra_need = review_slot - len(final_review)
         final_new = new_candidates[:new_target + extra_need]
 
-    # --- Step 8: 判断 Advisor 模式 ---
+    # --- Step 8: 加载软标签 + 判断 Advisor 模式 ---
     avg_mastery = float(profile_dict.get("avg_mastery") or 0.5)
     total_questions = int(profile_dict.get("total_questions") or 0)
     weak_kp_count = int(profile_dict.get("weak_kp_count") or 0)
 
-    advisor_mode = _determine_advisor_mode(avg_mastery, weak_kp_count)
+    soft_labels = await _load_soft_labels(user_id)
+
+    advisor_mode = _determine_advisor_mode(avg_mastery, weak_kp_count, soft_labels)
     instruction = _build_instruction(advisor_mode, weak_kps, theta)
 
     # --- Step 9: 组装学习目标 ---
@@ -350,16 +352,57 @@ def _normalize_topics(raw) -> List[str]:
     return []
 
 
-def _determine_advisor_mode(avg_mastery: float, weak_kp_count: int) -> str:
+async def _load_soft_labels(user_id: int) -> dict:
+    """从 user_soft_labels 表加载最新软标签"""
+    try:
+        from sqlalchemy import text
+        from database.db import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            sql = text(
+                "SELECT * FROM user_soft_labels WHERE user_id = :uid ORDER BY calculated_at DESC LIMIT 1"
+            )
+            result = await db.execute(sql, {"uid": user_id})
+            row = result.fetchone()
+            if row:
+                return {
+                    "independence": float(row.independence_score or 50),
+                    "persistence": float(row.persistence_score or 50),
+                    "metacognition": float(row.metacognition_score or 50),
+                    "helpseeking": float(row.helpseeking_score or 50),
+                    "reflection": float(row.reflection_score or 50),
+                    "transfer": float(row.transfer_score or 50),
+                    "composite": float(row.composite_score or 50),
+                }
+    except Exception:
+        pass
+    return {}
+
+
+def _determine_advisor_mode(avg_mastery: float, weak_kp_count: int,
+                            soft_labels: dict = None) -> str:
     """
-    MODE_SCAFFOLD  : avg_mastery < 0.4 或 薄弱知识点 > 3
-    MODE_CHALLENGE : avg_mastery > 0.8 且 weak_kp_count <= 1
-    MODE_ENCOURAGE : 其他（中间状态）
+    联合判定：mastery 画像 + 六维软标签
+
+    MODE_SCAFFOLD  : avg_mastery < 0.4 OR weak_kp > 3 OR 自主性 < 30 OR 坚持性 < 25
+    MODE_CHALLENGE : avg_mastery > 0.8 AND 自主性 > 60 AND 迁移能力 > 50
+    MODE_ENCOURAGE : 其他
     """
+    sl = soft_labels or {}
+
+    # SCAFFOLD 条件
     if avg_mastery < 0.4 or weak_kp_count > 3:
         return "MODE_SCAFFOLD"
-    if avg_mastery > 0.8 and weak_kp_count <= 1:
+    if sl.get("independence", 50) < 30:
+        return "MODE_SCAFFOLD"
+    if sl.get("persistence", 50) < 25:
+        return "MODE_SCAFFOLD"
+
+    # CHALLENGE 条件
+    if (avg_mastery > 0.8
+            and sl.get("independence", 50) > 60
+            and sl.get("transfer", 50) > 50):
         return "MODE_CHALLENGE"
+
     return "MODE_ENCOURAGE"
 
 
