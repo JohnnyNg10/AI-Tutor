@@ -250,6 +250,45 @@ export const chatAPI = {
     }),
 }
 
+export const errorDiagnosisAPI = {
+  /** 结构化错因诊断（五维分析） */
+  diagnose: ({ questionId, userAnswerSteps, finalAnswer, timeSpent } = {}) =>
+    request('/error-classification/diagnose', {
+      method: 'POST',
+      body: JSON.stringify({
+        question_id: questionId,
+        user_answer_steps: userAnswerSteps ?? [],
+        final_answer: finalAnswer ?? '',
+        time_spent: timeSpent ?? null,
+      }),
+    }),
+}
+
+export const ocrAPI = {
+  /** OCR 手写答案识别，上传图片返回识别文本 */
+  parse: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request('/ocr/parse', {
+      method: 'POST',
+      body: formData,
+    })
+  },
+}
+
+export const knowledgeTreeAPI = {
+  /** 获取指定专题的知识树（含用户掌握度状态） */
+  getTopic: (topicName) =>
+    request(`/knowledge-tree/topic/${encodeURIComponent(topicName)}`),
+
+  /** 获取单个知识节点详情（跨专题） */
+  getNode: (nodeId) =>
+    request(`/knowledge-tree/node/${encodeURIComponent(nodeId)}`),
+
+  /** 获取所有专题列表 */
+  getTopics: () => request('/knowledge-tree/topics'),
+}
+
 export default {
   auth: authAPI,
   profile: profileAPI,
@@ -257,5 +296,8 @@ export default {
   learningTools: learningToolsAPI,
   advisor: advisorAPI,
   chat: chatAPI,
+  errorDiagnosis: errorDiagnosisAPI,
+  ocr: ocrAPI,
+  knowledgeTree: knowledgeTreeAPI,
   ensureCurrentUserId,
 }
