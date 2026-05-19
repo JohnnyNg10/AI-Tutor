@@ -80,11 +80,173 @@ class GradingService:
                     "success": False,
                 })
 
+        # LLM 根据内容语义分组（题目+解题过程配对）
+        if len(results) >= 2:
+            try:
+                results = await self._group_ocr_results_by_llm(results)
+            except Exception as e:
+                logger.warning(f"LLM分组失败，保留原始结果: {e}")
+
         session.status = "reviewing"
         session.question_count = len(results)
         await db.commit()
 
         return results
+
+    async def _group_ocr_results_by_llm(self, results: List[dict]) -> List[dict]:
+        """使用 LLM 根据数学内容语义将 OCR 结果分组（题目+解题过程配对）"""
+        import json
+        import re
+        from openai import AsyncOpenAI
+        from utils.config import settings
+
+        # 构造 prompt：列出每条结果
+        items_desc = []
+        for r in results:
+            q_preview = (r.get("ocr_text") or "")[:200]
+            a_preview = (r.get("answer_text") or "")[:200]
+            has_q = r["has_question"]
+            has_a = r["has_answer"]
+
+            if has_q and has_a:
+                type_label = "题目+解题过程（混合）"
+                content = f"题目：{q_preview}\n解题过程：{a_preview}"
+            elif has_q:
+                type_label = "题目（无解题过程）"
+                content = q_preview
+            elif has_a:
+                type_label = "解题过程（无题目）"
+                content = a_preview
+            else:
+                type_label = "未识别到数学内容"
+                content = (q_preview or a_preview or "(空)")
+
+            items_desc.append(f"[索引{r['index']}] 类型: {type_label}\n内容: {content}")
+
+        prompt = f"""你是一个数学题目识别系统。以下是从 {len(results)} 张图片中 OCR 识别出的内容。
+
+每条记录包含一个索引和识别出的数学文本。请根据**数学内容语义**判断哪些解题过程属于哪道题目，将它们分组。
+
+识别结果：
+{chr(10).join(items_desc)}
+
+请分析以上内容并返回 JSON 分组结果。分组规则：
+1. 同一道题的"题目内容"和"解题过程"放在同一组
+2. 通过数学主题、公式、知识点判断是否属于同一题（如：都涉及数列递推 → 可能同组；一个数列一个几何 → 不同组）
+3. 如果某条内容同时包含题目和解题过程（混合类型），它自己就是一个完整组
+4. 如果某条只有题目没有解题过程，单独成组（answer_indices 为空）
+5. 如果某条只有解题过程没有题目，尝试匹配最相关的题目；匹配不上则单独成组
+6. 每个索引必须且只能出现在一个组中
+7. 给每组一个简短的主题描述（topic）
+
+请严格按以下 JSON 格式返回（不要添加任何其他文字）：
+```json
+{{
+  "groups": [
+    {{
+      "question_indices": [0, 2],
+      "answer_indices": [1],
+      "topic": "数列递推求通项公式"
+    }},
+    {{
+      "question_indices": [3],
+      "answer_indices": [],
+      "topic": "解三角形"
+    }}
+  ]
+}}
+```
+
+question_indices 包含该组所有包含题目内容的索引，answer_indices 包含该组所有包含解题过程的索引。"""
+
+        # 调用 LLM
+        client = AsyncOpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_api_base,
+        )
+        response = await client.chat.completions.create(
+            model=settings.llm_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=2000,
+        )
+        content = response.choices[0].message.content.strip()
+        logger.info(f"LLM grouping response length: {len(content)}")
+
+        # 解析 JSON
+        json_match = re.search(r'```json\s*([\s\S]*?)\s*```', content)
+        if json_match:
+            parsed = json.loads(json_match.group(1))
+        else:
+            parsed = json.loads(content)
+
+        groups = parsed.get("groups", [])
+        if not groups:
+            logger.info("LLM returned no groups, keeping original results")
+            return results
+
+        # 验证：每个索引是否恰好出现一次
+        all_indices = set()
+        for g in groups:
+            for idx in (g.get("question_indices", []) + g.get("answer_indices", [])):
+                if idx in all_indices:
+                    logger.warning(f"LLM分组索引 {idx} 重复，回退到原始结果")
+                    return results
+                all_indices.add(idx)
+        if all_indices != set(range(len(results))):
+            logger.warning(f"LLM分组索引不完整 {all_indices} vs {set(range(len(results)))}, 回退到原始结果")
+            return results
+
+        # 按分组合并
+        merged = []
+        for g in groups:
+            q_indices = g.get("question_indices", [])
+            a_indices = g.get("answer_indices", [])
+            topic = g.get("topic", "")
+
+            # 合并题目文本
+            q_texts = []
+            for idx in q_indices:
+                t = results[idx].get("ocr_text", "") or results[idx].get("question_text", "")
+                if t.strip():
+                    q_texts.append(t.strip())
+            merged_question = "\n\n".join(q_texts)
+
+            # 合并答案文本
+            a_texts = []
+            for idx in a_indices:
+                t = results[idx].get("answer_text", "") or results[idx].get("student_answer", "")
+                if t.strip():
+                    a_texts.append(t.strip())
+            merged_answer = "\n\n".join(a_texts)
+
+            # 如果题目索引里的条目本身也包含答案，追加
+            for idx in q_indices:
+                extra_a = results[idx].get("answer_text", "")
+                if extra_a and extra_a.strip():
+                    merged_answer = (merged_answer + "\n\n" + extra_a.strip()).strip()
+
+            all_source_indices = q_indices + a_indices
+            merged.append({
+                "index": len(merged),
+                "question_text": merged_question,
+                "student_answer": merged_answer,
+                "ocr_text": merged_question,
+                "answer_text": merged_answer,
+                "has_question": bool(merged_question.strip()),
+                "has_answer": bool(merged_answer.strip()),
+                "merged_from": all_source_indices,
+                "source_image_indices": all_source_indices,
+                "source_filenames": [results[i]["filename"] for i in all_source_indices if i < len(results)],
+                "topic": topic,
+                "success": True,
+            })
+
+        logger.info(f"LLM grouped {len(results)} raw results into {len(merged)} questions")
+        for m in merged:
+            logger.info(f"  Q{m['index']}: topic={m['topic']}, sources={m['merged_from']}")
+
+        return merged
 
     async def submit_corrections(self, db: AsyncSession, session_id: str,
                                   corrections: List[dict]) -> List[GradingQuestion]:

@@ -10,7 +10,6 @@ export function useGrading() {
   const questionImages = ref([])
   const answerImages = ref([])
   const ocrResults = ref([])
-  const currentQuestionIndex = ref(0)
   const correctionStatus = reactive({})
 
   const report = ref(null)
@@ -42,7 +41,6 @@ export function useGrading() {
     questionImages.value = []
     answerImages.value = []
     ocrResults.value = []
-    currentQuestionIndex.value = 0
     Object.keys(correctionStatus).forEach(k => delete correctionStatus[k])
     report.value = null
     progress.current = 0
@@ -103,7 +101,7 @@ export function useGrading() {
   return {
     mode, step, loading, error,
     sessionId, questionImages, answerImages,
-    ocrResults, currentQuestionIndex, correctionStatus,
+    ocrResults, correctionStatus,
     progress, questionStatuses, report,
     hasImages, allQuestionsReviewed,
     reset, startNewGrading, goToList,

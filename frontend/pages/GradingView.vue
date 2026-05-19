@@ -123,92 +123,117 @@
             </div>
           </div>
 
-          <!-- Step 2: 核对识别结果 -->
+          <!-- Step 2: 核对识别结果 — scrollable all-questions view -->
           <div v-if="step >= 2" class="figma-step-card">
             <div class="figma-step-head">
               <span class="figma-step-num">2</span>
               <span class="figma-step-title">核对识别结果</span>
               <span v-if="ocrReady" class="figma-auto-badge">
                 <CheckCircle2 :size="14" />
-                自动识别完成
+                共 {{ ocrResults.length }} 题
               </span>
             </div>
 
-            <div v-if="ocrReady && ocrResults.length > 0">
-              <div class="figma-review-wrap">
-                <!-- Left: original image preview -->
-                <div class="figma-review-left" @click="showLightbox(currentPreviewImage)">
-                  <img
-                    v-if="currentPreviewImage"
-                    :src="currentPreviewImage"
-                    class="figma-review-img"
-                    alt=""
-                  />
-                  <Camera v-else :size="32" color="#86868B" />
-                  <span class="figma-review-left-label">{{ currentPreviewImage ? '点击放大' : '暂无图片' }}</span>
+            <div v-if="ocrReady && ocrResults.length > 0" class="review-scrollable">
+              <!-- Each question card -->
+              <div
+                v-for="(item, qIdx) in ocrResults"
+                :key="qIdx"
+                class="question-review-card"
+              >
+                <!-- Card header -->
+                <div class="question-card-header">
+                  <span class="question-card-num">第{{ qIdx + 1 }}题</span>
+                  <span class="question-card-topic" v-if="item.topic">{{ item.topic }}</span>
+                  <span
+                    v-if="item.merged_from && item.merged_from.length > 1"
+                    class="merged-badge"
+                  >
+                    已合并 {{ item.merged_from.length }} 张图片
+                  </span>
                 </div>
 
-                <!-- Right: rendered math content (Figma: read-only + AI correct) -->
-                <div class="figma-review-right">
-                  <div class="figma-ocr-section">
-                    <div class="figma-ocr-label-row">
-                      <span class="figma-ocr-label">【题目】</span>
-                      <button
-                        class="ai-correct-btn"
-                        :disabled="correctingText"
-                        @click="openCorrectionDialog('question')"
-                      >
-                        <Wand2 :size="14" />
-                        AI 纠错
-                      </button>
-                    </div>
-                    <div
-                      class="figma-ocr-rendered"
-                      v-html="renderLatex(currentQText) || '<span class=\'placeholder\'>等待OCR识别结果...</span>'"
-                    ></div>
-                  </div>
-                  <div class="figma-ocr-section">
-                    <div class="figma-ocr-label-row">
-                      <span class="figma-ocr-label">【解题过程】</span>
-                      <button
-                        class="ai-correct-btn"
-                        :disabled="correctingText"
-                        @click="openCorrectionDialog('answer')"
-                      >
-                        <Wand2 :size="14" />
-                        AI 纠错
-                      </button>
-                    </div>
-                    <div
-                      class="figma-ocr-rendered"
-                      v-html="renderLatex(currentAText) || '<span class=\'placeholder\'>等待OCR识别结果...</span>'"
-                    ></div>
+                <!-- Source image thumbnails -->
+                <div class="question-card-images" v-if="item.source_image_indices?.length">
+                  <div
+                    v-for="srcIdx in item.source_image_indices"
+                    :key="srcIdx"
+                    class="question-card-thumb"
+                    @click="showLightbox(getImagePreview(srcIdx))"
+                  >
+                    <img
+                      v-if="getImagePreview(srcIdx)"
+                      :src="getImagePreview(srcIdx)"
+                      class="question-card-thumb-img"
+                      alt=""
+                    />
+                    <Camera v-else :size="20" color="#86868B" />
+                    <span class="thumb-label">图片 {{ srcIdx + 1 }}</span>
                   </div>
                 </div>
-              </div>
 
-              <!-- Pagination -->
-              <div v-if="ocrResults.length > 1" class="figma-pagination">
-                <button :disabled="currentQuestionIndex === 0" @click="prevQuestion">←</button>
-                <span>{{ currentQuestionIndex + 1 }} / {{ ocrResults.length }}</span>
-                <button :disabled="currentQuestionIndex >= ocrResults.length - 1" @click="nextQuestion">→</button>
-              </div>
+                <!-- Question text (rendered math) -->
+                <div class="figma-ocr-section">
+                  <div class="figma-ocr-label-row">
+                    <span class="figma-ocr-label">【题目】</span>
+                    <button
+                      class="ai-correct-btn"
+                      :disabled="correctingText"
+                      @click="openCorrectionDialog(qIdx, 'question')"
+                    >
+                      <Wand2 :size="14" />
+                      AI 纠错
+                    </button>
+                  </div>
+                  <div
+                    class="figma-ocr-rendered"
+                    v-html="renderLatex(item.question_text || item.ocr_text) || '<span class=\'placeholder\'>未识别到题目内容</span>'"
+                  ></div>
+                </div>
 
-              <!-- Confirm -->
-              <div class="figma-confirm-row">
-                <button
-                  class="figma-btn-primary"
-                  :disabled="gradingInProgress"
-                  @click="handleStartGrading"
-                >
-                  <Loader2 v-if="gradingInProgress" :size="16" class="spinning" />
-                  {{ gradingInProgress ? '批改中...' : '确认无误，开始批改' }}
-                </button>
+                <!-- Answer text (rendered math) -->
+                <div class="figma-ocr-section">
+                  <div class="figma-ocr-label-row">
+                    <span class="figma-ocr-label">【解题过程】</span>
+                    <button
+                      class="ai-correct-btn"
+                      :disabled="correctingText"
+                      @click="openCorrectionDialog(qIdx, 'answer')"
+                    >
+                      <Wand2 :size="14" />
+                      AI 纠错
+                    </button>
+                  </div>
+                  <div
+                    class="figma-ocr-rendered"
+                    v-html="renderLatex(item.student_answer || item.answer_text) || '<span class=\'placeholder\'>未识别到解题过程</span>'"
+                  ></div>
+                </div>
+
+                <!-- Merge info -->
+                <div v-if="item.merged_from && item.merged_from.length > 1" class="question-card-actions">
+                  <span class="merged-detail">
+                    AI 自动合并自 {{ item.merged_from.length }} 张图片
+                    (图片 {{ item.merged_from.map(i => i + 1).join('、') }})
+                  </span>
+                </div>
               </div>
             </div>
 
             <div v-else-if="ocrReady && ocrResults.length === 0" class="figma-empty">
               暂无识别结果，请重新上传
+            </div>
+
+            <!-- Confirm button (sticky at bottom) -->
+            <div v-if="ocrReady && ocrResults.length > 0" class="figma-confirm-row figma-confirm-sticky">
+              <button
+                class="figma-btn-primary"
+                :disabled="gradingInProgress"
+                @click="handleStartGrading"
+              >
+                <Loader2 v-if="gradingInProgress" :size="16" class="spinning" />
+                {{ gradingInProgress ? '批改中...' : `确认无误，开始批改 (${ocrResults.length}题)` }}
+              </button>
             </div>
           </div>
 
@@ -216,7 +241,7 @@
           <div v-if="correctionDialog.open" class="correction-overlay" @click.self="correctionDialog.open = false">
             <div class="correction-dialog">
               <div class="correction-dialog-header">
-                <h4>AI 智能纠错 — {{ correctionDialog.section === 'question' ? '题目' : '解题过程' }}</h4>
+                <h4>AI 智能纠错 — 第{{ correctionDialog.qIdx + 1 }}题 {{ correctionDialog.section === 'question' ? '题目' : '解题过程' }}</h4>
                 <button class="correction-close" @click="correctionDialog.open = false">&times;</button>
               </div>
               <div class="correction-current">
@@ -231,7 +256,7 @@
                   v-model="correctionDialog.userInput"
                   class="correction-input"
                   rows="3"
-                  placeholder="用自然语言描述需要修正的地方，例如：&#10;'第二行的公式应该是 a_n = 2^n - 1 而不是 2n - 1'&#10;'把 ∑ 改成 sigma，分母应该是 n(n+1) 不是 n+1'"
+                  placeholder="用自然语言描述需要修正的地方，例如：&#10;'第二行的公式应该是 a_n = 2^n - 1 而不是 2n - 1'&#10;'把分母改成 n(n+1)，不是 n+1'"
                 ></textarea>
                 <button
                   class="figma-btn-primary correction-submit"
@@ -294,7 +319,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick, reactive } from 'vue'
+import { ref, computed, onMounted, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, ArrowLeft, ArrowRight, CheckCircle2, Camera, ClipboardCheck,
@@ -313,7 +338,7 @@ const router = useRouter()
 const {
   mode, step, loading, error,
   sessionId, questionImages, answerImages,
-  ocrResults, currentQuestionIndex, correctionStatus,
+  ocrResults, correctionStatus,
   progress, questionStatuses,
   reset, startNewGrading, goToList,
   setOCRResults, markReviewed,
@@ -331,29 +356,23 @@ const fileInputRef = ref(null)
 // All uploaded images (single merged upload zone per Figma)
 const allImages = computed(() => [...questionImages.value, ...answerImages.value])
 
-// Editable OCR text for current question
-const currentQText = ref('')
-const currentAText = ref('')
+// Get preview URL for an image by its original upload index
+function getImagePreview(uploadIndex) {
+  return allImages.value[uploadIndex]?.preview || ''
+}
 
 // AI Correction dialog state
 const correctionDialog = reactive({
   open: false,
+  qIdx: 0,
   section: 'question', // 'question' | 'answer'
   currentText: '',
   userInput: '',
   result: '',
-  originalText: ''
 })
 
 // OCR data is ready for review
 const ocrReady = computed(() => ocrResults.value.length > 0)
-
-// Image preview for current OCR question (from uploaded images)
-const currentPreviewImage = computed(() => {
-  const idx = currentQuestionIndex.value
-  const allImgs = allImages.value
-  return allImgs[idx]?.preview || ''
-})
 
 // Render LaTeX + plain text to HTML using KaTeX
 function renderLatex(text) {
@@ -419,15 +438,6 @@ function escapeHTML(str) {
     .replace(/\n/g, '<br>')
 }
 
-// Watch current question index to load editable text
-watch(currentQuestionIndex, () => {
-  const r = ocrResults.value[currentQuestionIndex.value]
-  if (r) {
-    currentQText.value = r.question_text || r.ocr_text || ''
-    currentAText.value = r.student_answer || r.answer_text || ''
-  }
-})
-
 function triggerUpload() { fileInputRef.value?.click() }
 
 function handleFileSelect(e) {
@@ -455,31 +465,21 @@ function removeImage(index) {
   }
 }
 
-function prevQuestion() {
-  if (currentQuestionIndex.value > 0) {
-    markReviewed(currentQuestionIndex.value)
-    currentQuestionIndex.value--
-  }
-}
-
-function nextQuestion() {
-  if (currentQuestionIndex.value < ocrResults.value.length - 1) {
-    markReviewed(currentQuestionIndex.value)
-    currentQuestionIndex.value++
-  }
-}
-
 function showLightbox(src) {
   if (src) lightboxImage.value = src
 }
 
 // === AI Correction Dialog ===
-function openCorrectionDialog(section) {
-  const text = section === 'question' ? currentQText.value : currentAText.value
+function openCorrectionDialog(qIdx, section) {
+  const item = ocrResults.value[qIdx]
+  if (!item) return
+  const text = section === 'question'
+    ? (item.question_text || item.ocr_text || '')
+    : (item.student_answer || item.answer_text || '')
   correctionDialog.open = true
+  correctionDialog.qIdx = qIdx
   correctionDialog.section = section
   correctionDialog.currentText = text
-  correctionDialog.originalText = text
   correctionDialog.userInput = ''
   correctionDialog.result = ''
 }
@@ -503,17 +503,15 @@ async function handleCorrectText() {
 
 function applyCorrection() {
   if (!correctionDialog.result) return
+  const item = ocrResults.value[correctionDialog.qIdx]
+  if (!item) return
   if (correctionDialog.section === 'question') {
-    currentQText.value = correctionDialog.result
-    // Also update in ocrResults
-    const r = ocrResults.value[currentQuestionIndex.value]
-    if (r) r.question_text = correctionDialog.result
+    item.question_text = correctionDialog.result
   } else {
-    currentAText.value = correctionDialog.result
-    const r = ocrResults.value[currentQuestionIndex.value]
-    if (r) r.student_answer = correctionDialog.result
+    item.student_answer = correctionDialog.result
   }
   correctionDialog.open = false
+  markReviewed(correctionDialog.qIdx)
 }
 
 async function handleUploadAndOCR() {
@@ -525,24 +523,18 @@ async function handleUploadAndOCR() {
     const res = await gradingAPI.uploadImages(formData)
     const data = res?.data || res
 
-    // Backend returns ocr_results array with {index, filename, ocr_text, has_question, success}
+    // Backend returns grouped ocr_results with merged_from, source_image_indices, etc.
     const rawResults = data.ocr_results || data.questions || []
-    // Map ocr_text to question_text for review panel
+    // Keep raw OCR data for potential split, and add image previews
     const mappedResults = rawResults.map((r, i) => ({
       ...r,
       question_text: r.question_text || r.ocr_text || '',
-      student_answer: r.student_answer || '',
-      image_preview: allImages.value[r.index ?? i]?.preview || '',
+      student_answer: r.student_answer || r.answer_text || '',
+      // Store raw individual results for split functionality
+      _raw_ocr: [],
     }))
     setOCRResults(mappedResults)
     sessionId.value = data.session_id
-
-    // Initialize current question text
-    const first = mappedResults[0]
-    if (first) {
-      currentQText.value = first.question_text || ''
-      currentAText.value = first.student_answer || ''
-    }
   } catch (e) {
     error.value = e?.message || 'OCR识别失败，请重试'
   } finally {
@@ -554,19 +546,13 @@ async function handleStartGrading() {
   gradingInProgress.value = true
   error.value = ''
 
-  // Save current edits before submitting
-  markReviewed(currentQuestionIndex.value)
-
-  // Build corrections payload from all OCR results + user edits
-  const corrections = ocrResults.value.map((r, i) => {
-    const isCurrent = i === currentQuestionIndex.value
-    return {
-      index: r.index ?? i,
-      question_text: isCurrent ? currentQText.value : (r.question_text || r.ocr_text || ''),
-      student_answer: isCurrent ? currentAText.value : (r.student_answer || ''),
-      ocr_text: r.ocr_text || '',
-    }
-  })
+  // Build corrections payload directly from all OCR results + user edits
+  const corrections = ocrResults.value.map((r, i) => ({
+    index: i,
+    question_text: r.question_text || r.ocr_text || '',
+    student_answer: r.student_answer || r.answer_text || '',
+    ocr_text: r.ocr_text || '',
+  }))
 
   try {
     const res = await gradingAPI.submitCorrections({
@@ -846,6 +832,64 @@ onMounted(() => {
 .figma-confirm-row { display: flex; justify-content: center; padding-top: 16px; }
 
 .figma-empty { text-align: center; padding: 40px 0; color: #86868B; font-size: 14px; }
+
+/* === Scrollable Review Layout === */
+.review-scrollable {
+  display: flex; flex-direction: column; gap: 16px;
+  max-height: 65vh; overflow-y: auto; padding-right: 4px;
+  margin-bottom: 20px;
+}
+.review-scrollable::-webkit-scrollbar { width: 6px; }
+.review-scrollable::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+
+.question-review-card {
+  background: #FAF2E0; border-radius: 12px; padding: 20px;
+  display: flex; flex-direction: column; gap: 12px;
+  border: 1px solid #f0e4cc;
+}
+
+.question-card-header { display: flex; align-items: center; gap: 10px; }
+.question-card-num {
+  font-size: 15px; font-weight: 700; color: #0E61AC;
+  background: #fff; border-radius: 8px; padding: 4px 12px;
+}
+.question-card-topic { font-size: 12px; color: #86868B; }
+.merged-badge {
+  font-size: 11px; background: #dbeafe; color: #1e40af;
+  padding: 2px 8px; border-radius: 4px; font-weight: 500;
+}
+
+/* Image thumbnails row */
+.question-card-images { display: flex; gap: 8px; flex-wrap: wrap; }
+.question-card-thumb {
+  width: 80px; height: 80px; border-radius: 8px; overflow: hidden;
+  border: 1px solid #e5e7eb; background: #fff; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  transition: border-color 0.15s;
+}
+.question-card-thumb:hover { border-color: #0E61AC; }
+.question-card-thumb-img { width: 100%; height: 60px; object-fit: cover; }
+.thumb-label { font-size: 10px; color: #86868B; margin-top: 2px; }
+
+/* Merge / Split actions */
+.question-card-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-top: 8px; border-top: 1px dashed #e5d5b0;
+}
+.merged-detail { font-size: 12px; color: #86868B; }
+.split-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: 1px solid #f59e0b; border-radius: 6px;
+  color: #d97706; padding: 4px 10px; font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.15s; font-family: var(--font-family);
+}
+.split-btn:hover { background: #fef3c7; }
+
+/* Sticky confirm button */
+.figma-confirm-sticky {
+  position: sticky; bottom: 0; background: linear-gradient(180deg, transparent, #fff 30%);
+  margin-top: 0; padding-top: 24px;
+}
 
 /* Lightbox */
 .lightbox-overlay {
