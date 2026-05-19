@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 
+from algorithms.bkt import BKTParams
 from models.chat import KnowledgePoint, UserKnowledgeMastery
 from models.learning_analytics import Favorite, MistakeBook, UserAbilityHistory
 from models.profile import UserProfile
@@ -134,7 +135,7 @@ async def _upsert_bkt_mastery(
             denominator = numerator + (1 - prior) * (1 - p_guess)
 
         posterior = numerator / denominator if denominator > 0 else prior
-        p_transit = 0.15
+        p_transit = BKTParams().p_learn
         new_p_known = posterior + (1 - posterior) * p_transit
         new_p_known = _clamp(new_p_known, 0.0, 1.0)
 

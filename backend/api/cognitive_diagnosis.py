@@ -437,33 +437,19 @@ async def api_reset_streak(user_id: int):
 async def _get_user_mastery_for_skill_tree(db: AsyncSession, user_id: int) -> dict:
     """
     从数据库获取用户掌握度，转换为技能树可用格式 {node_id: p_known}
-    通过节点名称匹配 DB 中的知识点名称
+
+    匹配策略（三级fallback）：
+    1. 关联标签匹配（associated_tags）
+    2. 节点名称匹配
+    3. node_id匹配
     """
     from algorithms.skill_tree import get_skill_tree_builder
     builder = get_skill_tree_builder()
 
-    # 查询用户掌握度
     db_mastery = await get_user_mastery_dict(db, user_id)
 
-    # 构建 node_id → p_known 映射
-    mastery = {}
-    for topic, tree in builder.skill_trees.items():
-        for node_id, node in tree.nodes.items():
-            # 按节点名称精确匹配
-            if node.name in db_mastery:
-                mastery[node_id] = db_mastery[node.name]
-            else:
-                # 模糊匹配：检查 DB key 是否包含节点名
-                matched = False
-                for db_name, p in db_mastery.items():
-                    if node.name in db_name or db_name in node.name:
-                        mastery[node_id] = p
-                        matched = True
-                        break
-                if not matched:
-                    mastery[node_id] = 0.5  # 默认值
-
-    return mastery
+    # 使用 SkillTreeBuilder 的标签匹配方法
+    return builder.match_user_mastery_by_tags(db_mastery)
 
 
 @router.post("/skill-tree", response_model=SkillTreeResponse)

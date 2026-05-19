@@ -27,6 +27,7 @@ from services.error_classification_service import (
     get_wrong_questions_by_error_category,
     get_rehabilitation_pack
 )
+from services.error_diagnosis_service import error_diagnosis_service, ErrorDiagnosisResult
 from utils.logger import logger
 from utils.auth import get_current_user
 
@@ -245,6 +246,53 @@ async def get_error_statistics(
         
     except Exception as e:
         logger.error(f"获取错误统计失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ 错因诊断（LLM驱动） ============
+
+class DiagnosisRequest(BaseModel):
+    """错因诊断请求"""
+    question_text: str = Field(..., description="题目内容")
+    standard_answer: str = Field("", description="标准答案/解析")
+    student_answer: str = Field(..., description="学生答案")
+    knowledge_points: List[str] = Field(default_factory=list, description="关联知识点名称")
+    user_mastery: Dict[str, float] = Field(default_factory=dict, description="学生掌握度 {kp_name: p_known}")
+    hint_levels_used: int = Field(0, description="使用的提示等级数")
+
+
+class DiagnosisResponse(BaseModel):
+    """错因诊断响应"""
+    success: bool
+    diagnosis: Dict[str, Any]
+
+
+@router.post("/diagnose", response_model=DiagnosisResponse)
+async def diagnose_error(request: DiagnosisRequest):
+    """
+    LLM错因诊断
+
+    对标猿辅导"五重错因分析法"：
+    1. 概念错误 (concept_error) — 不知道/记错了知识点
+    2. 过程错误 (process_error) — 思路/方法错了
+    3. 计算错误 (calculation_error) — 算错了
+    4. 审题错误 (reading_error) — 读错题了
+    5. 格式错误 (format_error) — 会做但表达有误
+
+    返回结构化诊断：错误类型、位置、严重程度、引导提示、是否需要重试
+    """
+    try:
+        result = await error_diagnosis_service.diagnose(
+            question_text=request.question_text,
+            standard_answer=request.standard_answer,
+            student_answer=request.student_answer,
+            knowledge_points=request.knowledge_points,
+            user_mastery=request.user_mastery,
+            hint_levels_used=request.hint_levels_used
+        )
+        return DiagnosisResponse(success=True, diagnosis=result.to_dict())
+    except Exception as e:
+        logger.error(f"错因诊断失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
