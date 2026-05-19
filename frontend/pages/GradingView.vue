@@ -36,24 +36,25 @@
         <div v-else class="history-list">
           <div
             v-for="item in historyList"
-            :key="item.id"
+            :key="item.session_id"
             class="card card-clickable history-card"
-            @click="viewReport(item.id)"
           >
-            <div class="history-card-header">
-              <div class="history-title-row">
-                <ScrollText :size="20" />
-                <span class="history-title">{{ item.title || '未命名批改' }}</span>
-                <span class="history-time">{{ formatTime(item.created_at) }}</span>
+            <div class="history-card-main" @click="viewReport(item.session_id)">
+              <div class="history-card-header">
+                <div class="history-title-row">
+                  <ScrollText :size="20" />
+                  <span class="history-title">{{ item.title || '未命名批改' }}</span>
+                  <span class="history-time">{{ formatTime(item.created_at) }}</span>
+                </div>
               </div>
-            </div>
-            <div class="history-summary">
-              {{ item.question_count || 0 }}题 | 平均分 {{ item.avg_score || 0 }} | {{ item.error_summary || '暂无摘要' }}
+              <div class="history-summary">
+                {{ item.question_count || 0 }}题 | 平均分 {{ item.avg_score || 0 }}
+              </div>
             </div>
             <div class="history-divider"></div>
             <div class="history-actions">
-              <button class="btn-text" @click.stop="viewReport(item.id)">查看报告</button>
-              <button class="btn-danger" @click.stop="confirmDelete(item)">删除</button>
+              <button class="btn-text" @click="viewReport(item.session_id)">查看报告</button>
+              <button class="btn-danger" @click="confirmDelete(item)">删除</button>
             </div>
           </div>
         </div>
@@ -61,124 +62,163 @@
 
       <!-- ===== UPLOAD MODE per Figma ===== -->
       <template v-if="mode === 'upload'">
-        <router-link to="/grading" class="back-link">
+        <button class="back-link" @click="goToList">
           <ArrowLeft :size="16" />
           返回列表
-        </router-link>
+        </button>
 
         <div class="upload-mode-badge">
           <Plus :size="16" />
           <span>新建批改</span>
         </div>
 
-        <!-- Step 1: 上传图片 -->
-        <div class="figma-step-card" v-if="step >= 1">
-          <div class="figma-step-head">
-            <span class="figma-step-num">1</span>
-            <span class="figma-step-title">上传图片</span>
-          </div>
-
-          <div class="figma-upload-grid" v-show="step === 1">
-            <div class="figma-upload-zone" @click="triggerUpload" @dragover.prevent @drop.prevent="handleDrop">
-              <input ref="fileInputRef" type="file" accept="image/*" multiple hidden @change="handleFileSelect" />
-              <Camera :size="28" />
-              <span class="upload-zone-text">点击或拖拽上传</span>
-              <span class="upload-zone-hint">支持 JPG / PNG / 手写图片</span>
+        <div class="steps-container">
+          <!-- Step 1: 上传图片 -->
+          <div class="figma-step-card">
+            <div class="figma-step-head">
+              <span class="figma-step-num">1</span>
+              <span class="figma-step-title">上传图片</span>
             </div>
-          </div>
 
-          <div class="figma-step-foot" v-if="step === 1">
-            <span class="figma-img-count">已上传 {{ allImages.length }} 张图片</span>
-            <button
-              class="figma-btn-primary"
-              :disabled="allImages.length === 0 || uploading"
-              @click="handleUploadAndOCR"
-            >
-              <span>{{ uploading ? '识别中...' : '下一步：开始识别' }}</span>
-              <ArrowRight :size="16" />
-            </button>
-          </div>
-        </div>
-
-        <!-- Step 2: 核对识别结果 -->
-        <div class="figma-step-card" v-if="step >= 2">
-          <div class="figma-step-head">
-            <span class="figma-step-num">2</span>
-            <span class="figma-step-title">核对识别结果</span>
-            <span v-if="step === 2" class="figma-auto-badge">
-              <CheckCircle2 :size="14" />
-              自动识别完成
-            </span>
-          </div>
-
-          <div v-show="step === 2">
-            <div v-if="ocrResults.length > 0" class="figma-review-wrap">
-              <!-- Left: original image -->
-              <div class="figma-review-left" @click="showLightbox(currentOCRImage)">
-                <img v-if="currentOCRImage" :src="currentOCRImage" class="figma-review-img" alt="" />
-                <span class="figma-review-left-label">原始图片（点击放大）</span>
+            <div class="figma-upload-grid">
+              <div
+                class="figma-upload-zone"
+                @click="triggerUpload"
+                @dragover.prevent
+                @drop.prevent="handleDrop"
+              >
+                <input
+                  ref="fileInputRef"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  @change="handleFileSelect"
+                />
+                <Camera :size="28" color="#86868B" />
+                <span class="upload-zone-text">点击或拖拽上传</span>
+                <span class="upload-zone-hint">支持 JPG / PNG / 手写图片</span>
               </div>
 
-              <!-- Right: structured text -->
-              <div class="figma-review-right">
-                <span class="figma-editable-hint">（可编辑）</span>
-                <div class="figma-ocr-section">
-                  <span class="figma-ocr-label">【题目】</span>
-                  <textarea
-                    v-model="currentQText"
-                    class="figma-ocr-textarea"
-                    rows="3"
-                  ></textarea>
-                </div>
-                <div class="figma-ocr-section">
-                  <span class="figma-ocr-label">【解题过程】</span>
-                  <textarea
-                    v-model="currentAText"
-                    class="figma-ocr-textarea"
-                    rows="6"
-                  ></textarea>
+              <!-- Image previews -->
+              <div v-if="allImages.length > 0" class="upload-previews">
+                <div v-for="(img, i) in allImages" :key="i" class="upload-preview-item">
+                  <img :src="img.preview" class="upload-preview-img" alt="" />
+                  <button class="upload-preview-remove" @click.stop="removeImage(i)">&times;</button>
                 </div>
               </div>
             </div>
 
-            <!-- Pagination -->
-            <div v-if="ocrResults.length > 1" class="figma-pagination">
-              <button :disabled="currentQuestionIndex === 0" @click="prevQuestion">←</button>
-              <span>{{ currentQuestionIndex + 1 }} / {{ ocrResults.length }}</span>
-              <button :disabled="currentQuestionIndex >= ocrResults.length - 1" @click="nextQuestion">→</button>
-            </div>
-
-            <div v-if="ocrResults.length === 0" class="figma-empty">暂无识别结果</div>
-
-            <!-- Confirm -->
-            <div class="figma-confirm-row">
-              <button class="figma-btn-primary" @click="handleStartGrading">
-                确认无误，开始批改
+            <div class="figma-step-foot">
+              <span class="figma-img-count">已上传 {{ allImages.length }} 张图片</span>
+              <button
+                class="figma-btn-primary"
+                :disabled="allImages.length === 0 || uploading"
+                @click="handleUploadAndOCR"
+              >
+                <Loader2 v-if="uploading" :size="16" class="spinning" />
+                <span>{{ uploading ? '识别中...' : '下一步：开始识别' }}</span>
+                <ArrowRight v-if="!uploading" :size="16" />
               </button>
             </div>
           </div>
 
-          <!-- Step 3: Grading -->
-          <div v-if="step === 3" class="figma-grading-progress">
-            <GradingProgress
-              :current="progress.current"
-              :total="progress.total"
-              :eta-seconds="progress.etaSeconds"
-              :question-statuses="questionStatuses"
-              @cancel="handleCancelGrading"
-              @view-report="handleViewPartialReport"
-            />
-          </div>
+          <!-- Step 2: 核对识别结果 -->
+          <div v-if="step >= 2" class="figma-step-card">
+            <div class="figma-step-head">
+              <span class="figma-step-num">2</span>
+              <span class="figma-step-title">核对识别结果</span>
+              <span v-if="ocrReady" class="figma-auto-badge">
+                <CheckCircle2 :size="14" />
+                自动识别完成
+              </span>
+            </div>
 
-          <!-- Step 4: Done -->
-          <div v-if="step === 4" class="figma-done">
-            <CheckCircle2 :size="48" class="figma-done-icon" />
-            <span class="figma-done-text">批改完成！</span>
-            <button class="figma-btn-primary" @click="viewReport(sessionId)">
-              查看报告 <ArrowRight :size="16" />
-            </button>
+            <div v-if="ocrReady && ocrResults.length > 0">
+              <div class="figma-review-wrap">
+                <!-- Left: original image preview -->
+                <div class="figma-review-left" @click="showLightbox(currentPreviewImage)">
+                  <img
+                    v-if="currentPreviewImage"
+                    :src="currentPreviewImage"
+                    class="figma-review-img"
+                    alt=""
+                  />
+                  <Camera v-else :size="32" color="#86868B" />
+                  <span class="figma-review-left-label">{{ currentPreviewImage ? '点击放大' : '暂无图片' }}</span>
+                </div>
+
+                <!-- Right: structured editable text -->
+                <div class="figma-review-right">
+                  <span class="figma-editable-hint">（可编辑）</span>
+                  <div class="figma-ocr-section">
+                    <span class="figma-ocr-label">【题目】</span>
+                    <textarea
+                      v-model="currentQText"
+                      class="figma-ocr-textarea"
+                      rows="3"
+                      placeholder="OCR识别的题目内容..."
+                    ></textarea>
+                  </div>
+                  <div class="figma-ocr-section">
+                    <span class="figma-ocr-label">【解题过程】</span>
+                    <textarea
+                      v-model="currentAText"
+                      class="figma-ocr-textarea"
+                      rows="6"
+                      placeholder="OCR识别的解题过程..."
+                    ></textarea>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Pagination -->
+              <div v-if="ocrResults.length > 1" class="figma-pagination">
+                <button :disabled="currentQuestionIndex === 0" @click="prevQuestion">←</button>
+                <span>{{ currentQuestionIndex + 1 }} / {{ ocrResults.length }}</span>
+                <button :disabled="currentQuestionIndex >= ocrResults.length - 1" @click="nextQuestion">→</button>
+              </div>
+
+              <!-- Confirm -->
+              <div class="figma-confirm-row">
+                <button
+                  class="figma-btn-primary"
+                  :disabled="gradingInProgress"
+                  @click="handleStartGrading"
+                >
+                  <Loader2 v-if="gradingInProgress" :size="16" class="spinning" />
+                  {{ gradingInProgress ? '批改中...' : '确认无误，开始批改' }}
+                </button>
+              </div>
+            </div>
+
+            <div v-else-if="ocrReady && ocrResults.length === 0" class="figma-empty">
+              暂无识别结果，请重新上传
+            </div>
           </div>
         </div>
+
+        <!-- Lightbox -->
+        <div v-if="lightboxImage" class="lightbox-overlay" @click="lightboxImage = ''">
+          <img :src="lightboxImage" class="lightbox-image" alt="" @click.stop />
+        </div>
+      </template>
+
+      <!-- ===== GRADING MODE (loading) ===== -->
+      <template v-if="mode === 'grading'">
+        <button class="back-link" @click="handleCancelGrading">
+          <ArrowLeft :size="16" />
+          返回列表
+        </button>
+
+        <GradingProgress
+          :current="progress.current"
+          :total="progress.total"
+          :eta-seconds="progress.etaSeconds"
+          :question-statuses="questionStatuses"
+          @cancel="handleCancelGrading"
+          @view-report="handleViewReport"
+        />
       </template>
 
       <!-- Delete confirm dialog -->
@@ -195,14 +235,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Plus, ArrowLeft, ArrowRight, CheckCircle2, Camera, ClipboardCheck, Lightbulb, ScrollText
+  Plus, ArrowLeft, ArrowRight, CheckCircle2, Camera, ClipboardCheck,
+  Lightbulb, ScrollText, Loader2
 } from 'lucide-vue-next'
 import AppLayout from '../components/AppLayout.vue'
-import ImageUploader from '../components/grading/ImageUploader.vue'
-import OCRReviewPanel from '../components/grading/OCRReviewPanel.vue'
 import GradingProgress from '../components/grading/GradingProgress.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { gradingAPI } from '../services/grading-api.js'
@@ -216,7 +255,6 @@ const {
   sessionId, questionImages, answerImages,
   ocrResults, currentQuestionIndex, correctionStatus,
   progress, questionStatuses,
-  hasImages, allQuestionsReviewed,
   reset, startNewGrading, goToList,
   setOCRResults, markReviewed,
   startGrading: beginGrading, updateProgress, completeGrading
@@ -224,25 +262,36 @@ const {
 
 const historyList = ref([])
 const uploading = ref(false)
+const gradingInProgress = ref(false)
 const deleteTarget = ref(null)
 const lightboxImage = ref('')
 const fileInputRef = ref(null)
 
-// Single merged upload area (Figma: all images in one zone, AI auto-separates)
+// All uploaded images (single merged upload zone per Figma)
 const allImages = computed(() => [...questionImages.value, ...answerImages.value])
 
 // Editable OCR text for current question
 const currentQText = ref('')
 const currentAText = ref('')
 
-// Watch current OCR result to populate editable fields
-watch([currentQuestionIndex, () => ocrResults.value.length], () => {
+// OCR data is ready for review
+const ocrReady = computed(() => ocrResults.value.length > 0)
+
+// Image preview for current OCR question (from uploaded images)
+const currentPreviewImage = computed(() => {
+  const idx = currentQuestionIndex.value
+  const allImgs = allImages.value
+  return allImgs[idx]?.preview || ''
+})
+
+// Watch current question index to load editable text
+watch(currentQuestionIndex, () => {
   const r = ocrResults.value[currentQuestionIndex.value]
   if (r) {
-    currentQText.value = r.segments?.question?.join('\n') || r.question_text || ''
-    currentAText.value = r.segments?.answer?.join('\n') || r.answer_text || ''
+    currentQText.value = r.question_text || r.ocr_text || ''
+    currentAText.value = r.student_answer || ''
   }
-}, { immediate: true })
+})
 
 function triggerUpload() { fileInputRef.value?.click() }
 
@@ -260,31 +309,16 @@ function handleDrop(e) {
 function addImage(file) {
   if (!file.type.startsWith('image/')) return
   const url = URL.createObjectURL(file)
-  const img = { file, preview: url }
-  questionImages.value.push(img)
-  // Reset file input so same file can be re-selected
+  questionImages.value.push({ file, preview: url })
 }
 
-function removeAllImages() {
-  questionImages.value.forEach(img => URL.revokeObjectURL(img.preview))
-  questionImages.value = []
-  answerImages.value = []
+function removeImage(index) {
+  const img = questionImages.value[index]
+  if (img) {
+    URL.revokeObjectURL(img.preview)
+    questionImages.value.splice(index, 1)
+  }
 }
-
-const currentOCRImage = computed(() => {
-  const r = ocrResults.value[currentQuestionIndex.value]
-  return r?.image_preview || ''
-})
-
-const currentOCRSegments = computed(() => {
-  const r = ocrResults.value[currentQuestionIndex.value]
-  return r?.segments || { question: [], answer: [] }
-})
-
-function addQuestionImage(img) { questionImages.value.push(img) }
-function removeQuestionImage(i) { questionImages.value.splice(i, 1) }
-function addAnswerImage(img) { answerImages.value.push(img) }
-function removeAnswerImage(i) { answerImages.value.splice(i, 1) }
 
 function prevQuestion() {
   if (currentQuestionIndex.value > 0) {
@@ -301,7 +335,7 @@ function nextQuestion() {
 }
 
 function showLightbox(src) {
-  lightboxImage.value = src
+  if (src) lightboxImage.value = src
 }
 
 async function handleUploadAndOCR() {
@@ -309,12 +343,28 @@ async function handleUploadAndOCR() {
   error.value = ''
   try {
     const formData = new FormData()
-    questionImages.value.forEach(img => formData.append('images', img.file))
-    answerImages.value.forEach(img => formData.append('images', img.file))
+    questionImages.value.forEach(img => formData.append('files', img.file))
     const res = await gradingAPI.uploadImages(formData)
     const data = res?.data || res
-    setOCRResults(data.questions || [])
+
+    // Backend returns ocr_results array with {index, filename, ocr_text, has_question, success}
+    const rawResults = data.ocr_results || data.questions || []
+    // Map ocr_text to question_text for review panel
+    const mappedResults = rawResults.map((r, i) => ({
+      ...r,
+      question_text: r.question_text || r.ocr_text || '',
+      student_answer: r.student_answer || '',
+      image_preview: allImages.value[r.index ?? i]?.preview || '',
+    }))
+    setOCRResults(mappedResults)
     sessionId.value = data.session_id
+
+    // Initialize current question text
+    const first = mappedResults[0]
+    if (first) {
+      currentQText.value = first.question_text || ''
+      currentAText.value = first.student_answer || ''
+    }
   } catch (e) {
     error.value = e?.message || 'OCR识别失败，请重试'
   } finally {
@@ -323,38 +373,66 @@ async function handleUploadAndOCR() {
 }
 
 async function handleStartGrading() {
-  beginGrading()
+  gradingInProgress.value = true
   error.value = ''
+
+  // Save current edits before submitting
+  markReviewed(currentQuestionIndex.value)
+
+  // Build corrections payload from all OCR results + user edits
+  const corrections = ocrResults.value.map((r, i) => {
+    const isCurrent = i === currentQuestionIndex.value
+    return {
+      index: r.index ?? i,
+      question_text: isCurrent ? currentQText.value : (r.question_text || r.ocr_text || ''),
+      student_answer: isCurrent ? currentAText.value : (r.student_answer || ''),
+      ocr_text: r.ocr_text || '',
+    }
+  })
+
   try {
     const res = await gradingAPI.submitCorrections({
       session_id: sessionId.value,
-      questions: ocrResults.value.map((_, i) => ({
-        index: i,
-        corrected_text: '',
-        corrected_answer: ''
-      }))
+      corrections
     })
     const data = res?.data || res
 
-    if (data.event === 'complete') {
-      completeGrading(data)
-    } else {
-      updateProgress(data)
+    // Backend returns synchronous result with summary
+    // Show loading state, then navigate to report
+    const totalQuestions = corrections.length
+
+    // Initialize progress for visual feedback
+    mode.value = 'grading'
+    progress.total = totalQuestions
+    progress.current = totalQuestions
+    progress.status = 'done'
+
+    // Mark all questions as done for the progress UI
+    for (let i = 0; i < totalQuestions; i++) {
+      questionStatuses[i] = 'done'
     }
+
+    // Brief delay so user sees the completion animation
+    await new Promise(r => setTimeout(r, 1200))
+
+    // Navigate to report page
+    router.push(`/grading/report/${sessionId.value}`)
   } catch (e) {
     error.value = e?.message || '批改失败，请重试'
-    step.value = 2
+    gradingInProgress.value = false
   }
 }
 
 async function handleCancelGrading() {
   try {
-    await gradingAPI.cancelGrading(sessionId.value)
+    if (sessionId.value) {
+      await gradingAPI.cancelGrading(sessionId.value)
+    }
   } catch {}
   goToList()
 }
 
-function handleViewPartialReport() {
+function handleViewReport() {
   router.push(`/grading/report/${sessionId.value}`)
 }
 
@@ -369,8 +447,10 @@ function confirmDelete(item) {
 async function handleDelete() {
   if (!deleteTarget.value) return
   try {
-    await gradingAPI.deleteSession(deleteTarget.value.id)
-    historyList.value = historyList.value.filter(h => h.id !== deleteTarget.value.id)
+    await gradingAPI.deleteSession(deleteTarget.value.session_id)
+    historyList.value = historyList.value.filter(
+      h => h.session_id !== deleteTarget.value.session_id
+    )
   } catch (e) {
     error.value = e?.message || '删除失败'
   }
@@ -416,7 +496,9 @@ onMounted(() => {
 .subtitle { font-size: var(--font-base); color: var(--color-text-secondary); }
 .loading { display: flex; justify-content: center; padding: 60px 0; }
 .error { color: var(--color-error); padding: 16px; }
-.empty-state { text-align: center; padding: 60px 0; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.empty-state {
+  text-align: center; padding: 60px 0; display: flex; flex-direction: column; align-items: center; gap: 16px;
+}
 .empty-icon { color: #86868B4D; margin-bottom: 8px; }
 .empty-state h2 { font-size: var(--font-lg); font-weight: 600; color: var(--color-text-title); }
 .empty-state p { color: var(--color-text-secondary); font-size: var(--font-base); }
@@ -427,6 +509,7 @@ onMounted(() => {
 }
 .history-list { display: flex; flex-direction: column; gap: 12px; }
 .history-card { padding: 16px; }
+.history-card-main { cursor: pointer; }
 .history-card-header { margin-bottom: 8px; }
 .history-title-row { display: flex; align-items: center; gap: 8px; color: var(--color-text-body); }
 .history-title { font-weight: 600; font-size: var(--font-base); flex: 1; }
@@ -435,8 +518,20 @@ onMounted(() => {
 .history-divider { height: 1px; background: var(--color-border); margin-bottom: 8px; }
 .history-actions { display: flex; gap: 8px; }
 
-/* === UPLOAD MODE (Figma exact) === */
-.back-link { display: inline-flex; align-items: center; gap: 4px; color: #0E61AC; text-decoration: none; font-size: var(--font-base); margin-bottom: 16px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; border: none; border-radius: 10px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: var(--font-family); transition: opacity 0.2s; }
+.btn-primary { background: #0E61AC; color: #FAF2E0; }
+.btn-primary:hover:not(:disabled) { opacity: 0.85; }
+.btn-text { background: none; border: none; color: #0E61AC; cursor: pointer; font-size: 14px; font-family: var(--font-family); }
+.btn-text:hover { opacity: 0.7; }
+.btn-danger { background: none; border: none; color: #dc2626; cursor: pointer; font-size: 14px; font-family: var(--font-family); }
+.btn-danger:hover { opacity: 0.7; }
+
+/* === UPLOAD MODE (Figma alignment) === */
+.back-link {
+  display: inline-flex; align-items: center; gap: 4px; color: #0E61AC;
+  background: none; border: none; cursor: pointer; font-size: var(--font-base);
+  margin-bottom: 16px; padding: 0; font-family: var(--font-family);
+}
 .back-link:hover { opacity: 0.8; }
 
 .upload-mode-badge {
@@ -445,9 +540,11 @@ onMounted(() => {
   margin-bottom: 24px; box-shadow: 0 4px 12px rgba(14,97,172,.25);
 }
 
+.steps-container { display: flex; flex-direction: column; gap: 24px; }
+
 /* Step card */
 .figma-step-card {
-  background: #fff; border-radius: 16px; padding: 20px; margin-bottom: 24px;
+  background: #fff; border-radius: 16px; padding: 20px;
   box-shadow: 0 1px 4px rgba(0,0,0,.05);
 }
 
@@ -468,8 +565,8 @@ onMounted(() => {
   color: #0E61AC; font-size: 12px; font-weight: 500;
 }
 
-/* Upload zone (Figma: cream card with camera icon, padding 55px) */
-.figma-upload-grid { margin-bottom: 16px; }
+/* Upload zone */
+.figma-upload-grid { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
 
 .figma-upload-zone {
   background: #FAF2E0; border: 2px dashed #E9D4C1; border-radius: 12px;
@@ -479,6 +576,20 @@ onMounted(() => {
 .figma-upload-zone:hover { border-color: #0E61AC; background: #f5ede0; }
 .upload-zone-text { font-size: 15px; font-weight: 500; color: #1B1B1B; }
 .upload-zone-hint { font-size: 12px; color: #86868B; }
+
+/* Upload previews */
+.upload-previews { display: flex; gap: 8px; flex-wrap: wrap; }
+.upload-preview-item {
+  position: relative; width: 80px; height: 80px; border-radius: 8px;
+  overflow: hidden; border: 1px solid #EEEEEE;
+}
+.upload-preview-img { width: 100%; height: 100%; object-fit: cover; }
+.upload-preview-remove {
+  position: absolute; top: 2px; right: 2px;
+  width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,.5);
+  color: #fff; border: none; cursor: pointer; font-size: 12px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
 
 /* Step footer */
 .figma-step-foot {
@@ -542,16 +653,25 @@ onMounted(() => {
 
 .figma-empty { text-align: center; padding: 40px 0; color: #86868B; font-size: 14px; }
 
-/* Grading progress / Done */
-.figma-grading-progress { padding: 16px 0; }
-.figma-done { text-align: center; padding: 32px 0; display: flex; flex-direction: column; align-items: center; gap: 16px; }
-.figma-done-icon { color: #0E61AC; }
-.figma-done-text { font-size: var(--font-xl); font-weight: 700; color: #1B1B1B; }
+/* Lightbox */
+.lightbox-overlay {
+  position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.7);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.lightbox-image { max-width: 90vw; max-height: 90vh; border-radius: 12px; cursor: default; }
+
+.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.card {
+  background: #fff; border-radius: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.05);
+}
 
 @media (max-width: 768px) {
   .grading-page { padding: 16px; }
   .page-header { flex-direction: column; gap: 12px; }
   .figma-review-wrap { flex-direction: column; }
   .figma-review-left { width: 100%; min-height: 160px; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
 }
 </style>

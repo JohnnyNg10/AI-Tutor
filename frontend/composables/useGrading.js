@@ -1,7 +1,7 @@
 import { ref, reactive, computed } from 'vue'
 
 export function useGrading() {
-  const mode = ref('list') // 'list' | 'upload'
+  const mode = ref('list') // 'list' | 'upload' | 'grading'
   const step = ref(1) // 1=upload, 2=review, 3=grading, 4=done
   const loading = ref(false)
   const error = ref('')

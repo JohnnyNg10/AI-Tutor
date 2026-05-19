@@ -86,8 +86,8 @@ class GradingService:
                 id=uuid.uuid4().hex[:12],
                 session_id=session_id,
                 question_index=corr.get("index", 0),
-                question_text=corr.get("question_text", ""),
-                student_answer=corr.get("student_answer", ""),
+                question_text=corr.get("question_text") or corr.get("corrected_text", ""),
+                student_answer=corr.get("student_answer") or corr.get("corrected_answer", ""),
                 ocr_raw_text=corr.get("ocr_text", ""),
                 ocr_corrections=corr.get("corrections", []),
             )

@@ -53,7 +53,7 @@ async def submit_corrections(
 ):
     """提交用户校对后的文本"""
     session_id = payload.get("session_id")
-    corrections = payload.get("corrections", [])
+    corrections = payload.get("corrections") or payload.get("questions", [])
 
     if not session_id:
         raise HTTPException(status_code=400, detail="缺少 session_id")
