@@ -4,7 +4,7 @@
       <!-- 左侧品牌区 -->
       <div class="brand-side">
         <div class="brand-content">
-          <div class="brand-icon">🎓</div>
+          <div class="brand-icon"><GraduationCap :size="48" /></div>
           <h1 class="brand-title">AI Tutor</h1>
           <p class="brand-slogan">让AI成为你的私人教师</p>
           <p class="brand-sub">随时随地，高效学习</p>
@@ -22,7 +22,7 @@
       <div class="form-side">
         <div class="login-card">
           <div class="card-header">
-            <div class="logo-icon">🤖</div>
+            <div class="logo-icon"><Bot :size="28" /></div>
             <h2>欢迎回来</h2>
             <p>请登录您的账户</p>
           </div>
@@ -86,6 +86,7 @@
 <script setup>
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { GraduationCap, Bot } from 'lucide-vue-next'
 
 const form = reactive({
   username: '',
@@ -167,7 +168,7 @@ const handleLogin = async () => {
 }
 
 .brand-side {
-  background: linear-gradient(135deg, #1d1d1f 0%, #000000 100%);
+  background: var(--color-primary);
   height: 80%;
   width: 80%;
   display: flex;

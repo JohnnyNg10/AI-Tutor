@@ -123,9 +123,7 @@ const router = createRouter({
     },
     {
       path: '/exercises',
-      name: 'exercises',
-      component: () => import('../pages/ExercisesView.vue'),
-      meta: { requiresAuth: true }
+      redirect: '/mistake-book'  // 已合并到错题本（统一错题中心）
     },
     {
       path: '/profile',
@@ -154,13 +152,64 @@ const router = createRouter({
   ]
 })
 
+// 自动登录函数
+const autoLogin = async () => {
+  const username = 'demo_user'
+  const password = 'demo123456'
+  
+  try {
+    // 尝试注册（忽略已存在错误）
+    try {
+      await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      })
+    } catch (e) {
+      // 忽略注册错误
+    }
+    
+    // 登录
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      localStorage.setItem(AUTH_TOKEN_KEY, data.access_token)
+      localStorage.setItem('user_info', JSON.stringify({
+        id: data?.user?.id,
+        username: username,
+        name: username,
+        avatar: '👤',
+        loginTime: new Date().toISOString()
+      }))
+      return true
+    }
+  } catch (e) {
+    console.error('自动登录失败:', e)
+  }
+  return false
+}
+
 // 路由守卫：检查登录状态 + token 是否过期
-router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem(AUTH_TOKEN_KEY)
-  const isAuthenticated = !!token && !isTokenExpired(token)
+router.beforeEach(async (to, from, next) => {
+  let token = localStorage.getItem(AUTH_TOKEN_KEY)
+  let isAuthenticated = !!token && !isTokenExpired(token)
 
   if (token && !isAuthenticated) {
     clearAuthStorage()
+  }
+
+  // 如果访问需要登录的页面但没有有效 token，尝试自动登录
+  if (to.meta.requiresAuth && !isAuthenticated) {
+    const autoLoginSuccess = await autoLogin()
+    if (autoLoginSuccess) {
+      isAuthenticated = true
+      token = localStorage.getItem(AUTH_TOKEN_KEY)
+    }
   }
 
   if (isAuthenticated) {

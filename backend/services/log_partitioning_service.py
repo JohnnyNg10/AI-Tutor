@@ -227,34 +227,20 @@ class LogPartitioningService:
     
     # ==================== 归档管理 ====================
     
-    def archive_old_partitions(self) -> Dict[str, Any]:
-        """
-        归档旧分区
-        
-        对应行号40: 自动归档旧数据
-        """
+    async def archive_old_partitions(self, db) -> Dict[str, Any]:
+        """归档旧分区 - 自动归档旧数据"""
         try:
-            # 获取所有分区
             all_partitions = self._get_all_partitions()
-            
-            archived = []
-            errors = []
-            
+            archived, errors = [], []
             cutoff_date = datetime.now() - timedelta(days=self.ARCHIVE_AFTER_DAYS)
-            
             for partition in all_partitions:
-                # 检查是否需要归档
                 end_date = datetime.strptime(partition.end_date, '%Y-%m-%d')
-                
                 if end_date < cutoff_date and not partition.is_archived:
-                    result = self._archive_partition(partition.partition_name)
+                    result = await self._archive_partition(db, partition.partition_name)
                     if result['success']:
                         archived.append(partition.partition_name)
                     else:
-                        errors.append({
-                            'partition': partition.partition_name,
-                            'error': result['error']
-                        })
+                        errors.append({'partition': partition.partition_name, 'error': result['error']})
             
             return {
                 'success': len(errors) == 0,
@@ -267,32 +253,41 @@ class LogPartitioningService:
             logger.error(f"归档旧分区失败: {e}")
             return {'success': False, 'error': str(e)}
     
-    def _archive_partition(self, partition_name: str) -> Dict[str, Any]:
-        """归档单个分区"""
+    async def _archive_partition(self, db, partition_name: str) -> Dict[str, Any]:
+        """归档单个分区 - 从MySQL导出并写入本地JSON文件"""
+        from models.learning_analytics import UserInteractionLog
+        from sqlalchemy import select
+        import json as _json
         try:
-            # TODO: 实际归档逻辑（如写入S3、文件等）
-            # 这里模拟归档
-            
             meta_key = self.PARTITION_META_KEY.format(partition_name=partition_name)
-            
-            # 标记为已归档
-            self.redis_service.redis_client.hset(meta_key, 'is_archived', 'true')
-            self.redis_service.redis_client.hset(
-                meta_key,
-                'archived_at',
-                datetime.now().isoformat()
+            raw = self.redis_service.redis_client.hgetall(meta_key)
+            start_date = raw.get('start_date', '').decode('utf-8') if isinstance(raw.get('start_date', ''), bytes) else raw.get('start_date', '')
+            end_date = raw.get('end_date', '').decode('utf-8') if isinstance(raw.get('end_date', ''), bytes) else raw.get('end_date', '')
+
+            # 从MySQL获取该时间范围的日志
+            stmt = select(UserInteractionLog).where(
+                UserInteractionLog.created_at >= start_date,
+                UserInteractionLog.created_at < end_date
             )
-            
-            # 添加到归档队列
-            self.redis_service.redis_client.lpush(
-                self.ARCHIVE_QUEUE_KEY,
-                partition_name
-            )
-            
-            logger.info(f"分区归档成功: {partition_name}")
-            
-            return {'success': True}
-            
+            result = await db.execute(stmt)
+            records = result.scalars().all()
+            data = [{'id': r.id, 'user_id': r.user_id, 'interaction_type': r.interaction_type,
+                     'question_id': r.question_id, 'created_at': str(r.created_at)} for r in records]
+
+            # 写入本地归档文件
+            archive_dir = os.path.join(BACKEND_DIR, 'archives')
+            os.makedirs(archive_dir, exist_ok=True)
+            archive_file = os.path.join(archive_dir, f'{partition_name}.json')
+            with open(archive_file, 'w', encoding='utf-8') as f:
+                _json.dump(data, f, ensure_ascii=False, default=str)
+
+            self.redis_service.redis_client.hset(meta_key, mapping={
+                'is_archived': 'true', 'archived_at': datetime.now().isoformat(),
+                'archive_file': archive_file, 'record_count': str(len(data))
+            })
+            self.redis_service.redis_client.lpush(self.ARCHIVE_QUEUE_KEY, partition_name)
+            logger.info(f"分区归档成功: {partition_name}, {len(data)}条记录 -> {archive_file}")
+            return {'success': True, 'record_count': len(data)}
         except Exception as e:
             logger.error(f"归档分区失败: {e}")
             return {'success': False, 'error': str(e)}

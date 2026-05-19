@@ -81,75 +81,40 @@ function statusLabel(index) {
 
 <style scoped>
 .grading-progress {
-  background: var(--color-bg-white);
-  border-radius: var(--radius-card);
-  padding: 48px 32px;
-  box-shadow: var(--shadow-subtle);
+  background: #fff; border-radius: 16px; padding: 32px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.05);
 }
-
-.progress-center {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
-.spinner-icon { color: var(--color-primary); animation: spin 1s linear infinite; }
-.spinner-icon-sm { color: var(--color-primary); animation: spin 1s linear infinite; }
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.progress-title { font-size: var(--font-xl); font-weight: 700; color: var(--color-text-title); }
-.progress-desc { font-size: var(--font-base); color: var(--color-text-secondary); }
-.progress-eta { font-size: var(--font-sm); color: var(--color-text-secondary); }
-
+.progress-center { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.spinner-icon { color: #0E61AC; animation: spin 1s linear infinite; }
+.spinner-icon-sm { color: #0E61AC; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.progress-title { font-size: 18px; font-weight: 700; color: #1B1B1B; }
+.progress-desc { font-size: 14px; color: #86868B; }
+.progress-eta { font-size: 13px; color: #86868B; }
 .progress-bar-track {
-  width: 100%;
-  max-width: 400px;
-  height: 6px;
-  background: var(--color-border);
-  border-radius: 3px;
-  overflow: hidden;
-  margin: 8px 0;
+  width: 100%; max-width: 400px; height: 6px; background: #EEEEEE;
+  border-radius: 3px; overflow: hidden; margin: 8px 0;
 }
-
-.progress-bar-fill {
-  height: 100%;
-  background: var(--color-primary);
-  border-radius: 3px;
-  transition: width 0.3s ease;
-}
-
+.progress-bar-fill { height: 100%; background: #0E61AC; border-radius: 3px; transition: width 0.3s ease; }
 .status-list {
-  width: 100%;
-  max-width: 360px;
-  background: var(--color-bg-main);
-  border-radius: var(--radius-base);
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
+  width: 100%; max-width: 360px; background: #FAF2E0; border-radius: 12px;
+  padding: 16px; display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
 }
-
-.status-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--font-sm);
-  color: var(--color-text-body);
+.status-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #0E61AC; }
+.status-label { margin-left: auto; font-size: 12px; color: #86868B; }
+.status-item.waiting { color: #86868B; }
+.status-item.waiting .status-label { color: #86868B; }
+.progress-actions { display: flex; gap: 12px; margin-top: 16px; }
+.btn-secondary {
+  background: none; border: none; color: #86868B; font-size: 14px; cursor: pointer;
+  font-family: var(--font-family); transition: color 0.15s;
 }
-
-.status-label { margin-left: auto; font-size: var(--font-xs); color: var(--color-text-secondary); }
-
-.text-success { color: var(--color-success); }
-.text-muted { color: var(--color-text-secondary); }
-
-.progress-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 16px;
+.btn-secondary:hover { color: #dc2626; }
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #0E61AC; color: #FAF2E0; border: none; border-radius: 10px;
+  padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: opacity 0.2s; font-family: var(--font-family);
 }
+.btn-primary:hover { opacity: 0.85; }
 </style>

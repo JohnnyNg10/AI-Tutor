@@ -100,27 +100,46 @@ class QuestionRecommendationEngine:
             logger.error(f"获取到期复习题失败: {e}")
             return []
     
-    def fetch_review_question_details(
-        self, 
+    async def fetch_review_question_details(
+        self,
+        db,
         question_ids: List[str]
     ) -> List[Dict[str, Any]]:
         """
         从数据库获取复习题目的详细信息
-        
-        这里简化处理，实际应该从MySQL数据库查询
         """
-        # TODO: 从数据库查询题目详情
-        # 临时返回简化数据
-        review_questions = []
-        for qid in question_ids:
-            review_questions.append({
-                'question_id': qid,
-                'content': f'复习题 {qid} 内容',
-                'difficulty': 0,
-                'knowledge_points': [],
-                'is_review': True
-            })
-        return review_questions
+        return await self._fetch_questions_from_db(db, question_ids)
+
+    async def _fetch_questions_from_db(self, db, question_ids: List[str]) -> List[Dict[str, Any]]:
+        """异步从 questions 表查询题目详情"""
+        from sqlalchemy import select
+        from models.question import Question
+        try:
+            ids = [int(qid) for qid in question_ids if str(qid).isdigit()]
+            if not ids:
+                return [{'question_id': qid, 'content': f'复习题 {qid}', 'difficulty': 0, 'knowledge_points': [], 'is_review': True} for qid in question_ids]
+            stmt = select(Question).where(Question.id.in_(ids))
+            result = await db.execute(stmt)
+            questions = {q.id: q for q in result.scalars().all()}
+            review_questions = []
+            for qid in question_ids:
+                qid_int = int(qid) if str(qid).isdigit() else None
+                if qid_int and qid_int in questions:
+                    q = questions[qid_int]
+                    review_questions.append({
+                        'question_id': str(q.id), 'content': q.content,
+                        'difficulty': q.difficulty or 0,
+                        'knowledge_points': q.knowledge_points or [],
+                        'is_review': True
+                    })
+                else:
+                    review_questions.append({
+                        'question_id': qid, 'content': f'复习题 {qid}',
+                        'difficulty': 0, 'knowledge_points': [], 'is_review': True
+                    })
+            return review_questions
+        except Exception:
+            return [{'question_id': qid, 'content': f'复习题 {qid}', 'difficulty': 0, 'knowledge_points': [], 'is_review': True} for qid in question_ids]
     
     # ==================== 推荐策略分配 ====================
     
@@ -316,7 +335,6 @@ class QuestionRecommendationEngine:
         # Step 3: 添加复习题
         if review_count > 0 and due_reviews:
             review_ids = due_reviews[:review_count]
-            # TODO: 从数据库获取复习题详情
             for qid in review_ids:
                 rq = RecommendedQuestion(
                     question_id=qid,
@@ -369,6 +387,62 @@ class QuestionRecommendationEngine:
         random.shuffle(recommendations)
         
         logger.info(f"推荐完成：共 {len(recommendations)} 道题目")
+        return recommendations[:count]
+
+    async def recommend_questions_async(
+        self,
+        db,
+        user_id: int,
+        weak_kps: List[str],
+        theta: float,
+        recent_context: Optional[str] = None,
+        count: int = DEFAULT_RECOMMEND_COUNT
+    ) -> List[RecommendedQuestion]:
+        """异步版本 - 从数据库获取复习题详情"""
+        logger.info(f"开始推荐题目（异步）：用户={user_id}, θ={theta}, 数量={count}")
+
+        recommendations = []
+        due_reviews = self.get_due_review_questions(user_id, limit=10)
+        new_count, review_count = self.allocate_recommendation_slots(count, len(due_reviews))
+        logger.info(f"名额分配：新题={new_count}, 复习题={review_count}")
+
+        if review_count > 0 and due_reviews:
+            review_ids = due_reviews[:review_count]
+            review_details = await self.fetch_review_question_details(db, review_ids)
+            for detail in review_details:
+                rq = RecommendedQuestion(
+                    question_id=detail['question_id'],
+                    content=detail['content'],
+                    difficulty=detail.get('difficulty', theta),
+                    knowledge_points=detail.get('knowledge_points', []),
+                    is_review=True,
+                    recommendation_reason="这是你之前做错的题目，现在需要复习巩固。",
+                    advisor_tone="encouraging",
+                    estimated_time=8
+                )
+                recommendations.append(rq)
+
+        if new_count > 0:
+            candidates = self.candidate_builder.build_candidate_pool(
+                user_id=user_id, weak_kps=weak_kps, theta=theta,
+                recent_context=recent_context, top_k=new_count * 2
+            )
+            for candidate in candidates[:new_count]:
+                reason = self.generate_recommendation_reason(candidate, theta, weak_kps, is_review=False)
+                tone = self.determine_advisor_tone(candidate, theta, is_review=False)
+                rq = RecommendedQuestion(
+                    question_id=candidate.question_id, content=candidate.content,
+                    difficulty=candidate.difficulty, knowledge_points=candidate.knowledge_points,
+                    is_review=False, recommendation_reason=reason, advisor_tone=tone,
+                    estimated_time=self._estimate_time(candidate.difficulty),
+                    metadata={'kp_relevance': candidate.kp_relevance, 'difficulty_match': candidate.difficulty_match,
+                              'context_similarity': candidate.context_similarity, 'final_score': candidate.final_score}
+                )
+                recommendations.append(rq)
+
+        import random
+        random.shuffle(recommendations)
+        logger.info(f"推荐完成（异步）：共 {len(recommendations)} 道题目")
         return recommendations[:count]
     
     def format_recommendation_response(

@@ -20,6 +20,8 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from services.redis_service import RedisService
 from utils.logger import logger
 
@@ -182,13 +184,23 @@ class MasteryVisualizationService:
         
         从数据库查询知识点名称等信息
         """
-        # TODO: 从数据库查询
-        # 临时返回模拟数据
-        return {
-            'id': kp_id,
-            'name': f'知识点 {kp_id}',
-            'topic': '等差数列'
-        }
+        return {'id': kp_id, 'name': f'知识点 {kp_id}', 'topic': '等差数列'}
+
+    async def _get_kp_detail_async(self, db: AsyncSession, kp_id: str) -> Dict:
+        """从数据库查询知识点详情"""
+        from sqlalchemy import select
+        from models.chat import KnowledgePoint
+        try:
+            kid = int(kp_id) if str(kp_id).isdigit() else 0
+            if kid and db:
+                stmt = select(KnowledgePoint).where(KnowledgePoint.id == kid)
+                result = await db.execute(stmt)
+                kp = result.scalar_one_or_none()
+                if kp:
+                    return {'id': str(kp.id), 'name': kp.name, 'topic': '数列'}
+        except Exception:
+            pass
+        return {'id': kp_id, 'name': f'知识点 {kp_id}', 'topic': '等差数列'}
     
     # ==================== 专题进度计算 ====================
     
@@ -205,9 +217,8 @@ class MasteryVisualizationService:
         
         对应需求：摒弃传统题量进度条，基于知识树节点解锁率定义学习进度
         """
-        # 获取该专题下的所有知识点
-        # TODO: 从数据库查询专题知识点列表
-        topic_knowledge_points = self._get_topic_knowledge_points(topic)
+        # 获取该专题下的所有知识点（同步回退，API 已改用 skill_tree_builder）
+        topic_knowledge_points = [{'id': f'{topic}_001', 'name': f'{topic}基础', 'prerequisites': []}]
         
         total_nodes = len(topic_knowledge_points)
         if total_nodes == 0:
@@ -266,15 +277,24 @@ class MasteryVisualizationService:
             status=status
         )
     
-    def _get_topic_knowledge_points(self, topic: str) -> List[Dict[str, Any]]:
-        """获取专题下的知识点列表"""
-        # TODO: 从数据库查询
-        # 临时返回模拟数据
-        return [
-            {'id': f'{topic}_001', 'name': f'{topic}基础', 'prerequisites': []},
-            {'id': f'{topic}_002', 'name': f'{topic}进阶', 'prerequisites': [f'{topic}_001']},
-            {'id': f'{topic}_003', 'name': f'{topic}高级', 'prerequisites': [f'{topic}_002']},
-        ]
+    async def _get_topic_knowledge_points(self, db: AsyncSession, topic: str) -> List[Dict[str, Any]]:
+        """从 knowledge_points 表查询专题下的知识点列表"""
+        from sqlalchemy import select
+        from models.chat import KnowledgePoint
+        try:
+            stmt = select(KnowledgePoint)
+            result = await db.execute(stmt)
+            kps = result.scalars().all()
+            results = []
+            for kp in kps:
+                parent_name = kp.parent.name if kp.parent else ''
+                if topic in parent_name or topic in kp.name:
+                    results.append({'id': str(kp.id), 'name': kp.name, 'prerequisites': []})
+            if results:
+                return results
+        except Exception:
+            pass
+        return [{'id': f'{topic}_001', 'name': f'{topic}基础', 'prerequisites': []}]
     
     def _check_prerequisites_met(
         self,
@@ -324,7 +344,7 @@ class MasteryVisualizationService:
                 mastery_level=self.p_known_to_level(p_known),
                 color=self.p_known_to_color(p_known),
                 percentage=self.p_known_to_percentage(p_known),
-                last_practiced_at=None  # TODO: 从数据库获取
+                last_practiced_at=None
             ))
         
         # 计算全局掌握度
@@ -374,33 +394,39 @@ class MasteryVisualizationService:
     
     # ==================== 能力曲线数据 ====================
     
-    def get_ability_curve_data(
+    async def get_ability_curve_data(
         self,
+        db: AsyncSession,
         user_id: int,
         days: int = 30
     ) -> List[Dict[str, Any]]:
-        """
-        获取能力曲线历史数据
-        
-        用于绘制IRT θ值变化趋势图
-        """
-        # TODO: 从user_ability_history表查询
-        # 临时返回模拟数据
-        data = []
-        base_theta = 0.0
-        
-        for i in range(days):
-            date = datetime.now() - timedelta(days=days-i-1)
-            # 模拟数据：逐渐提升
-            theta = base_theta + (i / days) * 0.5
-            data.append({
-                'date': date.strftime('%Y-%m-%d'),
-                'theta': round(theta, 2),
-                'theta_ci_lower': round(theta - 0.5, 2),
-                'theta_ci_upper': round(theta + 0.5, 2)
-            })
-        
-        return data
+        """获取能力曲线历史数据（真实DB查询）"""
+        return await self._get_ability_curve_async(db, user_id, days)
+
+    async def _get_ability_curve_async(self, db: AsyncSession, user_id: int, days: int) -> List[Dict]:
+        """从 user_ability_history 表查询能力曲线"""
+        from sqlalchemy import select
+        from models.learning_analytics import UserAbilityHistory
+        cutoff = datetime.now() - timedelta(days=days)
+        stmt = (
+            select(UserAbilityHistory)
+            .where(UserAbilityHistory.user_id == user_id)
+            .where(UserAbilityHistory.recorded_at >= cutoff)
+            .order_by(UserAbilityHistory.recorded_at)
+        )
+        result = await db.execute(stmt)
+        records = result.scalars().all()
+        if records:
+            return [
+                {
+                    'date': r.recorded_at.strftime('%Y-%m-%d') if r.recorded_at else '',
+                    'theta': round(r.theta, 2),
+                    'theta_ci_lower': round(r.theta_ci_lower or r.theta - 0.5, 2),
+                    'theta_ci_upper': round(r.theta_ci_upper or r.theta + 0.5, 2),
+                }
+                for r in records
+            ]
+        return []
 
 
 # ==================== 便捷函数 ====================

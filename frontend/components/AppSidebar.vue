@@ -10,55 +10,26 @@
       </button>
     </div>
 
-    <!-- 新建对话按钮 -->
-    <button class="new-chat-btn" @click="$emit('new-chat')" v-show="!isCollapsed">
-      <Plus :size="18" />
-      <span>新对话</span>
-    </button>
-    <button class="new-chat-btn collapsed" @click="$emit('new-chat')" v-show="isCollapsed">
-      <Plus :size="20" />
-    </button>
+    <!-- 新建对话 (slot: shown only when parent provides content, per Figma: hidden by default) -->
+    <slot name="new-chat" :collapsed="isCollapsed" />
 
     <!-- 导航菜单 -->
     <nav class="sidebar-nav">
+      <span class="nav-section-title" v-show="!isCollapsed">导航</span>
       <router-link
         v-for="item in navItems"
         :key="item.path"
         :to="item.path"
         class="nav-item"
-        :class="{ active: currentPage === item.key }"
-        @click="$emit('navigate', item.key)"
+        :class="{ active: isActive(item) }"
       >
         <component :is="item.icon" :size="18" class="nav-icon" />
         <span class="nav-label" v-show="!isCollapsed">{{ item.label }}</span>
       </router-link>
     </nav>
 
-    <!-- 历史会话 (仅 AI 提问页显示) -->
-    <div class="history-section" v-if="showHistory && !isCollapsed">
-      <div class="history-header">
-        <span class="history-title">历史会话</span>
-        <span class="history-count" v-if="histories.length">{{ histories.length }}</span>
-      </div>
-      <div class="history-list">
-        <div
-          v-for="item in histories"
-          :key="item.id"
-          class="history-item"
-          :class="{ active: activeHistoryId === item.id }"
-          @click="$emit('select-history', item.id)"
-        >
-          <MessageSquare :size="14" class="history-icon" />
-          <div class="history-content">
-            <span class="history-name">{{ item.title }}</span>
-            <span class="history-meta">{{ item.time }}</span>
-          </div>
-        </div>
-        <div v-if="histories.length === 0" class="history-empty">
-          暂无会话记录
-        </div>
-      </div>
-    </div>
+    <!-- 历史会话 (slot: shown only when parent provides content, per Figma: hidden by default) -->
+    <slot name="history" :collapsed="isCollapsed" />
 
     <!-- 用户区 -->
     <div class="user-area" @click="showDropdown = !showDropdown" ref="userAreaRef">
@@ -124,8 +95,8 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, MessageCircle, Star, ClipboardList, Pencil, BarChart2,
   User, ChevronLeft, ChevronRight, ChevronDown,
@@ -133,29 +104,36 @@ import {
 } from 'lucide-vue-next'
 
 const props = defineProps({
-  currentPage: { type: String, default: 'ai-tutor' },
   showHistory: { type: Boolean, default: false },
   histories: { type: Array, default: () => [] },
   activeHistoryId: { type: String, default: null },
   userInfo: { type: Object, default: () => ({ name: '学习者', rank: '探索者 · Lv.2' }) },
 })
 
-const emit = defineEmits(['new-chat', 'navigate', 'select-history', 'logout'])
+const emit = defineEmits(['new-chat', 'navigate', 'select-history', 'logout', 'toggle'])
 
+const route = useRoute()
 const router = useRouter()
 const isCollapsed = ref(false)
 const showDropdown = ref(false)
 
+// Figma nav order: AI 问答, 智能推荐, 错题中心, 学习画像, AI批改
 const navItems = [
   { key: 'ai-tutor', path: '/ai-tutor', label: 'AI 问答', icon: MessageCircle },
   { key: 'recommend', path: '/recommend', label: '智能推荐', icon: Star },
-  { key: 'grading', path: '/grading', label: 'AI 批改', icon: ClipboardList },
-  { key: 'mistake-book', path: '/mistake-book', label: '练习中心', icon: Pencil },
+  { key: 'mistake-book', path: '/mistake-book', label: '错题中心', icon: Pencil },
   { key: 'profile', path: '/profile', label: '学习画像', icon: BarChart2 },
+  { key: 'grading', path: '/grading', label: 'AI 批改', icon: ClipboardList },
 ]
+
+function isActive(item) {
+  if (item.key === 'ai-tutor') return route.path === '/ai-tutor'
+  return route.path.startsWith(item.path)
+}
 
 const toggleCollapse = () => {
   isCollapsed.value = !isCollapsed.value
+  emit('toggle', isCollapsed.value)
 }
 
 const handleLogout = () => {
@@ -175,7 +153,8 @@ const handleLogout = () => {
   background: var(--color-primary);
   display: flex;
   flex-direction: column;
-  padding: var(--space-xl) var(--space-md);
+  padding: 16px;
+  gap: 12px;
   position: fixed;
   left: 0;
   top: 0;
@@ -194,8 +173,7 @@ const handleLogout = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-xl);
-  padding: 0 var(--space-xs);
+  padding: 0 4px;
 }
 
 .brand-text {
@@ -230,69 +208,45 @@ const handleLogout = () => {
   background: rgba(255,255,255,0.25);
 }
 
-/* 新对话按钮 */
-.new-chat-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg);
-  background: rgba(0, 0, 0, 0.25);
-  color: var(--color-text-white);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  transition: all var(--transition-fast);
-  margin-bottom: var(--space-xl);
-}
-
-.new-chat-btn:hover {
-  background: rgba(0, 0, 0, 0.35);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.new-chat-btn.collapsed {
-  padding: var(--space-md);
-  justify-content: center;
-  aspect-ratio: 1;
-  width: 40px;
-  height: 40px;
-  margin: 0 auto var(--space-xl);
-  border-radius: var(--radius-md);
-}
-
-/* 导航菜单 */
+/* 导航菜单 — Figma exact: #FAF2E0 card, cornerRadius 20, itemSpacing 8, padding 10 */
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs);
-  margin-bottom: var(--space-lg);
-  padding-bottom: var(--space-lg);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  gap: 8px;
+  padding: 10px;
+  background: #FAF2E0;
+  border-radius: 20px;
+}
+
+.nav-section-title {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: #1B1B1B;
+  padding: 0 6px;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-md) var(--space-md);
-  border-radius: var(--radius-md);
-  color: rgba(255, 255, 255, 0.75);
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  background: #EEEEEE;
+  color: #1B1B1B;
   font-size: var(--font-size-base);
   font-weight: 500;
   transition: all var(--transition-fast);
   white-space: nowrap;
+  text-decoration: none;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--color-text-white);
+  background: #DDDDDD;
 }
 
 .nav-item.active {
-  background: rgba(255, 255, 255, 0.2);
-  color: var(--color-text-white);
+  background: #0E61AC;
+  color: #FAF2E0;
   font-weight: 600;
 }
 
@@ -319,8 +273,6 @@ const handleLogout = () => {
   font-size: var(--font-size-xs);
   font-weight: 700;
   color: rgba(255, 255, 255, 0.5);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
 .history-count {

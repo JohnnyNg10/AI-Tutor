@@ -37,18 +37,28 @@ async def get_db():
 
 
 async def _column_exists(conn, table_name: str, column_name: str) -> bool:
-    query = text(
-        """
-        SELECT 1
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME = :table_name
-          AND COLUMN_NAME = :column_name
-        LIMIT 1
-        """
-    )
-    result = await conn.execute(query, {"table_name": table_name, "column_name": column_name})
-    return result.first() is not None
+    # Check if using SQLite
+    if "sqlite" in settings.database_url.lower():
+        # SQLite: use PRAGMA table_info
+        query = text(f"PRAGMA table_info({table_name})")
+        result = await conn.execute(query)
+        rows = result.fetchall()
+        # rows: [(cid, name, type, notnull, dflt_value, pk), ...]
+        return any(row[1] == column_name for row in rows)
+    else:
+        # MySQL: use INFORMATION_SCHEMA
+        query = text(
+            """
+            SELECT 1
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = :table_name
+              AND COLUMN_NAME = :column_name
+            LIMIT 1
+            """
+        )
+        result = await conn.execute(query, {"table_name": table_name, "column_name": column_name})
+        return result.first() is not None
 
 
 async def _ensure_v3_schema(conn):

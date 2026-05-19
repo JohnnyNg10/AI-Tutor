@@ -114,12 +114,13 @@ class CognitiveDiagnosisService:
         
         # 需求1：处理连击状态并获取UI效果
         streak_result = self.streak_handler.process_answer(user_id, is_correct, theta)
-        
         # 记录能力历史快照
         await self._record_ability_snapshot(db, user_id, theta_info)
 
         await db.commit()
 
+        # 需求1：将连击状态持久化到 Redis（服务重启不丢失）
+        await self.streak_handler.save_to_redis(user_id)
         return {
             'p_known': p_known_new,
             'p_known_change': p_known_new - p_known_old,
@@ -374,6 +375,32 @@ cognitive_service = CognitiveDiagnosisService()
 
 
 # 便捷函数
+async def get_user_mastery_dict(
+    db: AsyncSession,
+    user_id: int
+) -> Dict[str, float]:
+    """
+    获取用户所有知识点的掌握度，返回 {kp_name: p_known}
+
+    用于技能树、掌握度可视化等需要批量查询的场景
+    """
+    from sqlalchemy.orm import joinedload
+
+    stmt = (
+        select(UserKnowledgeMastery)
+        .where(UserKnowledgeMastery.user_id == user_id)
+        .options(joinedload(UserKnowledgeMastery.knowledge_point))
+    )
+    result = await db.execute(stmt)
+    mastery_list = result.unique().scalars().all()
+
+    mastery_dict = {}
+    for m in mastery_list:
+        if m.knowledge_point:
+            name = m.knowledge_point.name
+            mastery_dict[name] = m.p_known or 0.5
+
+    return mastery_dict
 async def update_mastery_after_answer(
     db: AsyncSession,
     user_id: int,

@@ -22,7 +22,7 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
-from rag.retriever import KnowledgeRetriever
+from rag.retriever import KnowledgeRetriever, get_retriever
 from services.redis_service import RedisService
 from utils.logger import logger
 from utils.config import settings
@@ -65,7 +65,7 @@ class RAGCandidatePoolBuilder:
     
     def __init__(self):
         """初始化RAG候选池构建器"""
-        self.retriever = KnowledgeRetriever()
+        self.retriever = get_retriever()
         self.redis_service = RedisService()
         logger.info("RAG候选池构建器初始化完成")
     
@@ -251,27 +251,22 @@ class RAGCandidatePoolBuilder:
             return candidates
         
         try:
-            # 获取上下文的向量表示
-            context_vector = self.retriever.embedding_function([recent_context])[0]
-            
-            for candidate in candidates:
-                content = candidate.get('content', '')
-                if not content:
+            # 批量 embedding：context + 所有候选内容
+            contents = [candidate.get('content', '')[:500] for candidate in candidates]
+            texts_to_embed = [recent_context] + contents
+            vectors = self.retriever.embedding_function(texts_to_embed)
+
+            context_vector = vectors[0]
+            for i, candidate in enumerate(candidates):
+                if not contents[i]:
                     candidate['context_similarity'] = 0.0
                     continue
-                
-                # 获取题目内容的向量表示
-                content_vector = self.retriever.embedding_function([content[:500]])[0]  # 限制长度
-                
-                # 计算余弦相似度
-                similarity = self._cosine_similarity(context_vector, content_vector)
-                candidate['context_similarity'] = max(0.0, similarity)  # 确保非负
-            
+                similarity = self._cosine_similarity(context_vector, vectors[i + 1])
+                candidate['context_similarity'] = max(0.0, similarity)
+
             logger.info(f"上下文相似度计算完成：{len(candidates)} 道题目")
-            
         except Exception as e:
             logger.error(f"计算上下文相似度失败: {e}")
-            # 失败时所有候选的上下文相似度为0
             for candidate in candidates:
                 candidate['context_similarity'] = 0.0
         

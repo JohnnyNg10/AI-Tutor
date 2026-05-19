@@ -29,6 +29,8 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from services.redis_service import RedisService
 from utils.logger import logger
 
@@ -242,20 +244,38 @@ class InteractionLoggerService:
     
     # ==================== 查询与分析 ====================
     
-    def get_user_interactions(
-        self,
-        user_id: int,
-        interaction_type: Optional[str] = None,
-        limit: int = 100
+    async def get_user_interactions_async(
+        self, db: AsyncSession, user_id: int,
+        interaction_type: Optional[str] = None, limit: int = 100
     ) -> List[Dict[str, Any]]:
-        """获取用户交互记录"""
+        """从 user_interaction_logs 表查询用户交互记录"""
+        from sqlalchemy import select, desc
+        from models.learning_analytics import UserInteractionLog
         try:
-            # TODO: 从数据库查询
-            # 临时从Redis队列获取
-            logs = self.redis_service.redis_client.lrange(
-                self.INTERACTION_LOG_QUEUE, 0, limit * 2
+            stmt = (
+                select(UserInteractionLog)
+                .where(UserInteractionLog.user_id == user_id)
+                .order_by(desc(UserInteractionLog.created_at))
+                .limit(limit)
             )
-            
+            if interaction_type:
+                stmt = stmt.where(UserInteractionLog.interaction_type == interaction_type)
+            result = await db.execute(stmt)
+            records = result.scalars().all()
+            return [
+                {'interaction_type': r.interaction_type, 'knowledge_points': r.knowledge_points,
+                 'created_at': r.created_at.isoformat() if r.created_at else ''}
+                for r in records
+            ]
+        except Exception:
+            return []
+
+    def get_user_interactions(
+        self, user_id: int, interaction_type: Optional[str] = None, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """获取用户交互记录（Redis 队列回退）"""
+        try:
+            logs = self.redis_service.redis_client.lrange(self.INTERACTION_LOG_QUEUE, 0, limit * 2)
             result = []
             for log_json in logs:
                 try:
@@ -263,13 +283,9 @@ class InteractionLoggerService:
                     if log_data.get('user_id') == user_id:
                         if interaction_type is None or log_data.get('interaction_type') == interaction_type:
                             result.append(log_data)
-                            if len(result) >= limit:
-                                break
-                except:
-                    continue
-            
+                            if len(result) >= limit: break
+                except: continue
             return result
-            
         except Exception as e:
             logger.error(f"获取用户交互记录失败: {e}")
             return []
@@ -331,13 +347,19 @@ class InteractionLoggerService:
     
     # ==================== 清理与维护 ====================
     
-    def clear_old_logs(self, days: int = 30) -> int:
-        """清理旧日志"""
+    async def clear_old_logs(self, db: AsyncSession, days: int = 30) -> int:
+        """清理旧日志 - 从MySQL删除指定天数前的记录"""
+        from sqlalchemy import delete
+        from models.learning_analytics import UserInteractionLog
+        from datetime import timedelta
         try:
-            # TODO: 实现清理逻辑
-            logger.info(f"清理{days}天前的交互日志")
-            return 0
-            
+            cutoff = datetime.now() - timedelta(days=days)
+            stmt = delete(UserInteractionLog).where(UserInteractionLog.created_at < cutoff)
+            result = await db.execute(stmt)
+            await db.commit()
+            count = result.rowcount
+            logger.info(f"清理{days}天前的交互日志: {count}条")
+            return count
         except Exception as e:
             logger.error(f"清理旧日志失败: {e}")
             return 0

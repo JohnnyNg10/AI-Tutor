@@ -59,91 +59,107 @@
         </div>
       </template>
 
-      <!-- ===== UPLOAD MODE ===== -->
+      <!-- ===== UPLOAD MODE per Figma ===== -->
       <template v-if="mode === 'upload'">
         <router-link to="/grading" class="back-link">
           <ArrowLeft :size="16" />
           返回列表
         </router-link>
 
-        <div class="upload-header">
-          <h2>新建批改</h2>
+        <div class="upload-mode-badge">
+          <Plus :size="16" />
+          <span>新建批改</span>
         </div>
 
-        <!-- Step 1: Upload Images -->
-        <div class="card step-card" v-if="step >= 1">
-          <div class="step-indicator">
-            <span class="step-num" :class="{ active: step === 1, done: step > 1 }">1</span>
-            <span class="step-title">上传图片</span>
+        <!-- Step 1: 上传图片 -->
+        <div class="figma-step-card" v-if="step >= 1">
+          <div class="figma-step-head">
+            <span class="figma-step-num">1</span>
+            <span class="figma-step-title">上传图片</span>
           </div>
-          <div class="step-body" v-show="step === 1 || step > 1">
-            <div class="upload-columns">
-              <div class="upload-col">
-                <h3>题目图片</h3>
-                <p class="col-hint">上传试卷或作业上的原题，确保文字清晰可读</p>
-                <ImageUploader
-                  title="点击上传题目图片"
-                  hint="支持 JPG / PNG，建议清晰拍摄"
-                  :images="questionImages"
-                  @add="addQuestionImage"
-                  @remove="removeQuestionImage"
-                />
+
+          <div class="figma-upload-grid" v-show="step === 1">
+            <div class="figma-upload-zone" @click="triggerUpload" @dragover.prevent @drop.prevent="handleDrop">
+              <input ref="fileInputRef" type="file" accept="image/*" multiple hidden @change="handleFileSelect" />
+              <Camera :size="28" />
+              <span class="upload-zone-text">点击或拖拽上传</span>
+              <span class="upload-zone-hint">支持 JPG / PNG / 手写图片</span>
+            </div>
+          </div>
+
+          <div class="figma-step-foot" v-if="step === 1">
+            <span class="figma-img-count">已上传 {{ allImages.length }} 张图片</span>
+            <button
+              class="figma-btn-primary"
+              :disabled="allImages.length === 0 || uploading"
+              @click="handleUploadAndOCR"
+            >
+              <span>{{ uploading ? '识别中...' : '下一步：开始识别' }}</span>
+              <ArrowRight :size="16" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 2: 核对识别结果 -->
+        <div class="figma-step-card" v-if="step >= 2">
+          <div class="figma-step-head">
+            <span class="figma-step-num">2</span>
+            <span class="figma-step-title">核对识别结果</span>
+            <span v-if="step === 2" class="figma-auto-badge">
+              <CheckCircle2 :size="14" />
+              自动识别完成
+            </span>
+          </div>
+
+          <div v-show="step === 2">
+            <div v-if="ocrResults.length > 0" class="figma-review-wrap">
+              <!-- Left: original image -->
+              <div class="figma-review-left" @click="showLightbox(currentOCRImage)">
+                <img v-if="currentOCRImage" :src="currentOCRImage" class="figma-review-img" alt="" />
+                <span class="figma-review-left-label">原始图片（点击放大）</span>
               </div>
-              <div class="upload-col">
-                <h3>解题过程图片</h3>
-                <p class="col-hint">上传你的解题草稿或答题纸，AI将识别手写内容</p>
-                <ImageUploader
-                  title="点击上传解题过程图片"
-                  hint="支持 JPG / PNG"
-                  :images="answerImages"
-                  @add="addAnswerImage"
-                  @remove="removeAnswerImage"
-                />
+
+              <!-- Right: structured text -->
+              <div class="figma-review-right">
+                <span class="figma-editable-hint">（可编辑）</span>
+                <div class="figma-ocr-section">
+                  <span class="figma-ocr-label">【题目】</span>
+                  <textarea
+                    v-model="currentQText"
+                    class="figma-ocr-textarea"
+                    rows="3"
+                  ></textarea>
+                </div>
+                <div class="figma-ocr-section">
+                  <span class="figma-ocr-label">【解题过程】</span>
+                  <textarea
+                    v-model="currentAText"
+                    class="figma-ocr-textarea"
+                    rows="6"
+                  ></textarea>
+                </div>
               </div>
             </div>
-            <div class="step-footer" v-if="step === 1">
-              <button
-                class="btn btn-primary"
-                :disabled="!hasImages"
-                @click="handleUploadAndOCR"
-              >
-                {{ uploading ? '识别中...' : '下一步：开始识别' }}
+
+            <!-- Pagination -->
+            <div v-if="ocrResults.length > 1" class="figma-pagination">
+              <button :disabled="currentQuestionIndex === 0" @click="prevQuestion">←</button>
+              <span>{{ currentQuestionIndex + 1 }} / {{ ocrResults.length }}</span>
+              <button :disabled="currentQuestionIndex >= ocrResults.length - 1" @click="nextQuestion">→</button>
+            </div>
+
+            <div v-if="ocrResults.length === 0" class="figma-empty">暂无识别结果</div>
+
+            <!-- Confirm -->
+            <div class="figma-confirm-row">
+              <button class="figma-btn-primary" @click="handleStartGrading">
+                确认无误，开始批改
               </button>
             </div>
           </div>
-        </div>
 
-        <!-- Step 2: Review OCR -->
-        <div class="card step-card" v-if="step >= 2">
-          <div class="step-indicator">
-            <span class="step-num" :class="{ active: step === 2, done: step > 2 }">2</span>
-            <span class="step-title">核对识别结果</span>
-            <CheckCircle2 v-if="step > 2" :size="18" class="text-success" />
-          </div>
-          <div class="step-body" v-show="step === 2">
-            <OCRReviewPanel
-              v-if="ocrResults.length > 0"
-              :current-image="currentOCRImage"
-              :index="currentQuestionIndex"
-              :total-images="ocrResults.length"
-              :correction-status="correctionStatus"
-              :segments="currentOCRSegments"
-              @prev="prevQuestion"
-              @next="nextQuestion"
-              @zoom="showLightbox"
-              @confirm="handleStartGrading"
-            />
-            <div v-else class="empty">暂无识别结果</div>
-          </div>
-        </div>
-
-        <!-- Step 3: Grading Progress -->
-        <div class="card step-card" v-if="step >= 3">
-          <div class="step-indicator">
-            <span class="step-num" :class="{ active: step === 3, done: step > 3 }">3</span>
-            <span class="step-title">批改中...</span>
-          </div>
-          <div class="step-body" v-show="step === 3">
+          <!-- Step 3: Grading -->
+          <div v-if="step === 3" class="figma-grading-progress">
             <GradingProgress
               :current="progress.current"
               :total="progress.total"
@@ -153,15 +169,14 @@
               @view-report="handleViewPartialReport"
             />
           </div>
-          <div class="step-body" v-if="step === 4">
-            <div class="done-state">
-              <CheckCircle2 :size="64" class="text-success" />
-              <h3>批改完成！</h3>
-              <button class="btn btn-primary" @click="viewReport(sessionId)">
-                查看报告
-                <ArrowRight :size="16" />
-              </button>
-            </div>
+
+          <!-- Step 4: Done -->
+          <div v-if="step === 4" class="figma-done">
+            <CheckCircle2 :size="48" class="figma-done-icon" />
+            <span class="figma-done-text">批改完成！</span>
+            <button class="figma-btn-primary" @click="viewReport(sessionId)">
+              查看报告 <ArrowRight :size="16" />
+            </button>
           </div>
         </div>
       </template>
@@ -180,10 +195,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Plus, ArrowLeft, ArrowRight, CheckCircle2, ClipboardCheck, Lightbulb, ScrollText
+  Plus, ArrowLeft, ArrowRight, CheckCircle2, Camera, ClipboardCheck, Lightbulb, ScrollText
 } from 'lucide-vue-next'
 import AppLayout from '../components/AppLayout.vue'
 import ImageUploader from '../components/grading/ImageUploader.vue'
@@ -202,7 +217,7 @@ const {
   ocrResults, currentQuestionIndex, correctionStatus,
   progress, questionStatuses,
   hasImages, allQuestionsReviewed,
-  reset, startNewGrading: startNew, goToList,
+  reset, startNewGrading, goToList,
   setOCRResults, markReviewed,
   startGrading: beginGrading, updateProgress, completeGrading
 } = useGrading()
@@ -211,6 +226,50 @@ const historyList = ref([])
 const uploading = ref(false)
 const deleteTarget = ref(null)
 const lightboxImage = ref('')
+const fileInputRef = ref(null)
+
+// Single merged upload area (Figma: all images in one zone, AI auto-separates)
+const allImages = computed(() => [...questionImages.value, ...answerImages.value])
+
+// Editable OCR text for current question
+const currentQText = ref('')
+const currentAText = ref('')
+
+// Watch current OCR result to populate editable fields
+watch([currentQuestionIndex, () => ocrResults.value.length], () => {
+  const r = ocrResults.value[currentQuestionIndex.value]
+  if (r) {
+    currentQText.value = r.segments?.question?.join('\n') || r.question_text || ''
+    currentAText.value = r.segments?.answer?.join('\n') || r.answer_text || ''
+  }
+}, { immediate: true })
+
+function triggerUpload() { fileInputRef.value?.click() }
+
+function handleFileSelect(e) {
+  const files = Array.from(e.target.files || [])
+  files.forEach(f => addImage(f))
+  if (fileInputRef.value) fileInputRef.value.value = ''
+}
+
+function handleDrop(e) {
+  const files = Array.from(e.dataTransfer?.files || [])
+  files.forEach(f => addImage(f))
+}
+
+function addImage(file) {
+  if (!file.type.startsWith('image/')) return
+  const url = URL.createObjectURL(file)
+  const img = { file, preview: url }
+  questionImages.value.push(img)
+  // Reset file input so same file can be re-selected
+}
+
+function removeAllImages() {
+  questionImages.value.forEach(img => URL.revokeObjectURL(img.preview))
+  questionImages.value = []
+  answerImages.value = []
+}
 
 const currentOCRImage = computed(() => {
   const r = ocrResults.value[currentQuestionIndex.value]
@@ -347,128 +406,152 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.grading-page { padding: 32px; max-width: var(--max-content-width); margin: 0 auto; }
+.grading-page { padding: 32px; margin: 0 auto; max-width: 1000px; }
 
+/* === LIST MODE === */
 .page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 24px;
+  display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px;
 }
-.header-left h1 {
-  font-size: var(--font-xxl);
-  font-weight: 700;
-  color: var(--color-text-title);
-  margin-bottom: 4px;
-}
+.header-left h1 { font-size: var(--font-xxl); font-weight: 700; color: var(--color-text-title); margin-bottom: 4px; }
 .subtitle { font-size: var(--font-base); color: var(--color-text-secondary); }
-
 .loading { display: flex; justify-content: center; padding: 60px 0; }
 .error { color: var(--color-error); padding: 16px; }
-
-.empty-state {
-  text-align: center;
-  padding: 60px 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-}
+.empty-state { text-align: center; padding: 60px 0; display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .empty-icon { color: #86868B4D; margin-bottom: 8px; }
 .empty-state h2 { font-size: var(--font-lg); font-weight: 600; color: var(--color-text-title); }
 .empty-state p { color: var(--color-text-secondary); font-size: var(--font-base); }
-
 .format-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  background: var(--color-bg-white);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-subtle);
-  color: var(--color-text-secondary);
-  font-size: var(--font-sm);
-  margin-top: 16px;
+  display: flex; align-items: center; gap: 8px; padding: 12px 20px;
+  background: #fff; border-radius: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.05);
+  color: var(--color-text-secondary); font-size: var(--font-sm); margin-top: 16px;
 }
-
 .history-list { display: flex; flex-direction: column; gap: 12px; }
-
 .history-card { padding: 16px; }
 .history-card-header { margin-bottom: 8px; }
-.history-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--color-text-body);
-}
+.history-title-row { display: flex; align-items: center; gap: 8px; color: var(--color-text-body); }
 .history-title { font-weight: 600; font-size: var(--font-base); flex: 1; }
 .history-time { font-size: var(--font-xs); color: var(--color-text-secondary); }
 .history-summary { font-size: var(--font-sm); color: var(--color-text-secondary); margin-bottom: 8px; }
 .history-divider { height: 1px; background: var(--color-border); margin-bottom: 8px; }
 .history-actions { display: flex; gap: 8px; }
 
-.back-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--color-primary);
-  text-decoration: none;
-  font-size: var(--font-base);
-  margin-bottom: 16px;
-}
-.back-link:hover { text-decoration: underline; }
+/* === UPLOAD MODE (Figma exact) === */
+.back-link { display: inline-flex; align-items: center; gap: 4px; color: #0E61AC; text-decoration: none; font-size: var(--font-base); margin-bottom: 16px; }
+.back-link:hover { opacity: 0.8; }
 
-.upload-header h2 { font-size: var(--font-xl); font-weight: 700; color: var(--color-text-title); margin-bottom: 20px; }
-
-.step-card { padding: 20px; margin-bottom: 16px; }
-
-.step-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--color-border);
+.upload-mode-badge {
+  display: inline-flex; align-items: center; gap: 6px; background: #0E61AC; color: #FAF2E0;
+  padding: 10px 16px; border-radius: 10px; font-size: var(--font-base); font-weight: 600;
+  margin-bottom: 24px; box-shadow: 0 4px 12px rgba(14,97,172,.25);
 }
 
-.step-num {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--color-border);
-  color: var(--color-text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--font-sm);
-  font-weight: 700;
+/* Step card */
+.figma-step-card {
+  background: #fff; border-radius: 16px; padding: 20px; margin-bottom: 24px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.05);
 }
-.step-num.active { background: var(--color-primary); color: #fff; }
-.step-num.done { background: var(--color-success); color: #fff; }
 
-.step-title { font-weight: 600; font-size: var(--font-md); color: var(--color-text-title); }
-
-.upload-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 16px; }
-.upload-col h3 { font-size: var(--font-base); font-weight: 600; color: var(--color-text-title); margin-bottom: 4px; }
-.col-hint { font-size: var(--font-xs); color: var(--color-text-secondary); margin-bottom: 10px; }
-
-.step-footer { display: flex; justify-content: flex-end; padding-top: 16px; border-top: 1px solid var(--color-border); }
-
-.done-state {
-  text-align: center;
-  padding: 40px 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
+.figma-step-head {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding-bottom: 12px;
+  border-bottom: 1px solid #EEEEEE;
 }
-.done-state h3 { font-size: var(--font-xl); font-weight: 700; color: var(--color-text-title); }
 
-.text-success { color: var(--color-success); }
+.figma-step-num {
+  width: 24px; height: 24px; border-radius: 50%; background: #0E61AC; color: #FAF2E0;
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0;
+}
+
+.figma-step-title { font-weight: 600; font-size: var(--font-md); color: #1B1B1B; }
+
+.figma-auto-badge {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: auto;
+  color: #0E61AC; font-size: 12px; font-weight: 500;
+}
+
+/* Upload zone (Figma: cream card with camera icon, padding 55px) */
+.figma-upload-grid { margin-bottom: 16px; }
+
+.figma-upload-zone {
+  background: #FAF2E0; border: 2px dashed #E9D4C1; border-radius: 12px;
+  padding: 55px 32px; display: flex; flex-direction: column; align-items: center; gap: 12px;
+  cursor: pointer; transition: border-color 0.2s, background 0.2s;
+}
+.figma-upload-zone:hover { border-color: #0E61AC; background: #f5ede0; }
+.upload-zone-text { font-size: 15px; font-weight: 500; color: #1B1B1B; }
+.upload-zone-hint { font-size: 12px; color: #86868B; }
+
+/* Step footer */
+.figma-step-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-top: 16px; border-top: 1px solid #EEEEEE;
+}
+.figma-img-count { font-size: 13px; color: #86868B; }
+
+.figma-btn-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #0E61AC; color: #FAF2E0; border: none; border-radius: 10px;
+  padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: opacity 0.2s; font-family: var(--font-family);
+}
+.figma-btn-primary:hover:not(:disabled) { opacity: 0.85; }
+.figma-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Step 2 Review (Figma: left image + right structured text) */
+.figma-review-wrap {
+  display: flex; gap: 16px; margin-bottom: 16px;
+}
+
+.figma-review-left {
+  width: 280px; flex-shrink: 0; background: #FAF2E0; border-radius: 12px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 20px; cursor: pointer; transition: opacity 0.2s; min-height: 200px;
+  position: relative; overflow: hidden;
+}
+.figma-review-left:hover { opacity: 0.85; }
+.figma-review-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; }
+.figma-review-left-label { font-size: 11px; color: #86868B; margin-top: 8px; }
+
+.figma-review-right {
+  flex: 1; background: #FAF2E0; border-radius: 12px; padding: 20px;
+  display: flex; flex-direction: column; gap: 12px; min-width: 0;
+}
+.figma-editable-hint { font-size: 11px; color: #86868B; }
+.figma-ocr-section { display: flex; flex-direction: column; gap: 6px; }
+.figma-ocr-label { font-size: 13px; font-weight: 600; color: #0E61AC; }
+.figma-ocr-textarea {
+  width: 100%; border: 1px solid #EEEEEE; border-radius: 8px; padding: 10px 12px;
+  font-size: 13px; font-family: var(--font-family); color: #454545; line-height: 1.7;
+  resize: vertical; outline: none; box-sizing: border-box; background: #fff;
+}
+.figma-ocr-textarea:focus { border-color: #0E61AC; }
+
+/* Pagination */
+.figma-pagination {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 10px 0; margin-bottom: 12px; font-size: 14px; color: #1B1B1B;
+}
+.figma-pagination button {
+  width: 28px; height: 28px; border: 1px solid #EEEEEE; border-radius: 8px;
+  background: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  color: #86868B; font-size: 14px; transition: all 0.15s;
+}
+.figma-pagination button:hover:not(:disabled) { border-color: #0E61AC; color: #0E61AC; }
+.figma-pagination button:disabled { opacity: 0.3; cursor: default; }
+
+.figma-confirm-row { display: flex; justify-content: center; padding-top: 16px; }
+
+.figma-empty { text-align: center; padding: 40px 0; color: #86868B; font-size: 14px; }
+
+/* Grading progress / Done */
+.figma-grading-progress { padding: 16px 0; }
+.figma-done { text-align: center; padding: 32px 0; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.figma-done-icon { color: #0E61AC; }
+.figma-done-text { font-size: var(--font-xl); font-weight: 700; color: #1B1B1B; }
 
 @media (max-width: 768px) {
   .grading-page { padding: 16px; }
-  .upload-columns { grid-template-columns: 1fr; }
   .page-header { flex-direction: column; gap: 12px; }
+  .figma-review-wrap { flex-direction: column; }
+  .figma-review-left { width: 100%; min-height: 160px; }
 }
 </style>

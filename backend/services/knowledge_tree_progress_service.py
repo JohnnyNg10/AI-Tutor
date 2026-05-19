@@ -22,6 +22,8 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from services.redis_service import RedisService
 from utils.logger import logger
 
@@ -96,45 +98,87 @@ class KnowledgeTreeProgressService:
         # 从Redis获取缓存的掌握度数据
         node_mastery: Dict[str, float] = {}
         try:
-            key = f"ai:tutor:mastery:{user_id}"
-            raw = self.redis_service.redis_client.hgetall(key)
-            if raw:
-                node_mastery = {k.decode() if isinstance(k, bytes) else k:
-                                float(v.decode() if isinstance(v, bytes) else v) / 100
-                                for k, v in raw.items()}
-        except Exception:
-            pass
+            # 获取知识点数据
+            knowledge_points = self._get_knowledge_points(topic)
 
-        nodes = []
-        for node_id, node in all_nodes.items():
-            if topic and node.topic != topic:
-                continue
-            p_known = node_mastery.get(node_id, 0.0)
-            nodes.append(KnowledgeNode(
-                node_id=node_id, name=node.name, topic=node.topic,
-                p_known=p_known,
-                is_unlocked=p_known >= self.UNLOCK_THRESHOLD,
-                is_mastered=p_known >= self.MASTERY_THRESHOLD,
-                prerequisites=node.prerequisites.copy()
-            ))
+            # 获取用户掌握度
+            mastery_data = self._get_user_mastery(user_id)
 
-        nodes = self._calculate_unlock_order(nodes)
-        topics = self._calculate_topic_progress(nodes)
+            # 构建节点
+            nodes = []
+            for kp in knowledge_points:
+                p_known = mastery_data.get(kp['id'], 0.0)
 
-        total_nodes = len(nodes)
-        total_unlocked = sum(1 for n in nodes if n.is_unlocked)
-        total_mastered = sum(1 for n in nodes if n.is_mastered)
-        overall_progress = (total_mastered / total_nodes * 100) if total_nodes > 0 else 0
+                node = KnowledgeNode(
+                    node_id=kp['id'],
+                    name=kp['name'],
+                    topic=kp['topic'],
+                    p_known=p_known,
+                    is_unlocked=p_known >= self.UNLOCK_THRESHOLD,
+                    is_mastered=p_known >= self.MASTERY_THRESHOLD,
+                    prerequisites=kp.get('prerequisites', [])
+                )
+                nodes.append(node)
 
-        tree_data = KnowledgeTreeData(
-            user_id=user_id, topics=topics, total_nodes=total_nodes,
-            total_unlocked=total_unlocked, total_mastered=total_mastered,
-            overall_progress=round(overall_progress, 1)
-        )
+            # 计算解锁顺序（拓扑排序）
+            nodes = self._calculate_unlock_order(nodes)
 
-        self._cache_tree_data(user_id, tree_data)
-        return tree_data
+            # 按专题分组计算进度
+            topics = self._calculate_topic_progress(nodes)
 
+            # 计算总体进度
+            total_nodes = len(nodes)
+            total_unlocked = sum(1 for n in nodes if n.is_unlocked)
+            total_mastered = sum(1 for n in nodes if n.is_mastered)
+            overall_progress = (total_mastered / total_nodes * 100) if total_nodes > 0 else 0
+
+            tree_data = KnowledgeTreeData(
+                user_id=user_id,
+                topics=topics,
+                total_nodes=total_nodes,
+                total_unlocked=total_unlocked,
+                total_mastered=total_mastered,
+                overall_progress=round(overall_progress, 1)
+            )
+
+            # 缓存数据
+            self._cache_tree_data(user_id, tree_data)
+
+            return tree_data
+
+        except Exception as e:
+            logger.error(f"构建知识树失败: {e}")
+            return KnowledgeTreeData(
+                user_id=user_id,
+                topics=[],
+                total_nodes=0,
+                total_unlocked=0,
+                total_mastered=0,
+                overall_progress=0.0
+            )
+
+    async def _get_knowledge_points(self, db: AsyncSession, topic: Optional[str] = None) -> List[Dict]:
+        """从 knowledge_points 表查询知识点列表"""
+        from sqlalchemy import select
+        from models.chat import KnowledgePoint
+        stmt = select(KnowledgePoint)
+        result = await db.execute(stmt)
+        kps = result.scalars().all()
+        all_kps = [
+            {'id': str(kp.id), 'name': kp.name, 'topic': kp.parent.name if kp.parent else '默认', 'prerequisites': []}
+            for kp in kps
+        ]
+        if topic:
+            return [kp for kp in all_kps if kp['topic'] == topic]
+        return all_kps if all_kps else [
+            {'id': 'default_001', 'name': '默认知识点', 'topic': '默认', 'prerequisites': []}
+        ]
+
+    async def _get_user_mastery(self, db: AsyncSession, user_id: int) -> Dict[str, float]:
+        """从 user_knowledge_mastery 表查询用户掌握度"""
+        from services.cognitive_diagnosis_service import get_user_mastery_dict
+        result = await get_user_mastery_dict(db, user_id)
+        return result if result else {'默认': 0.5}
     def _calculate_unlock_order(self, nodes: List[KnowledgeNode]) -> List[KnowledgeNode]:
         """计算解锁顺序（拓扑排序）"""
         unlocked_ids = set()

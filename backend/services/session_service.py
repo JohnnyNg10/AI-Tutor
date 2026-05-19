@@ -376,8 +376,20 @@ class SessionService:
                 
                 return removed
             else:
-                # TODO: 全局清理（需要扫描所有用户）
-                return 0
+                # 全局清理：扫描所有用户的session列表
+                removed = 0
+                user_keys = self.redis_service.redis_client.keys(
+                    self.USER_SESSIONS_KEY.format(user_id='*'))
+                for user_key in user_keys:
+                    key_str = user_key.decode('utf-8') if isinstance(user_key, bytes) else user_key
+                    session_ids = self.redis_service.redis_client.zrange(key_str, 0, -1)
+                    for sid in session_ids:
+                        sid_str = sid.decode('utf-8') if isinstance(sid, bytes) else sid
+                        session_key = self.SESSION_KEY_PREFIX.format(session_id=sid_str)
+                        if not self.redis_service.redis_client.exists(session_key):
+                            self.redis_service.redis_client.zrem(key_str, sid_str)
+                            removed += 1
+                return removed
                 
         except Exception as e:
             logger.error(f"清理过期Session失败: {e}")

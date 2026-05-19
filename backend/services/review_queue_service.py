@@ -22,6 +22,8 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from services.redis_service import RedisService
 from services.chroma_service import ChromaService
 from algorithms.rag_candidate_pool import RAGCandidatePoolBuilder
@@ -232,15 +234,29 @@ class ReviewQueueService:
             logger.error(f"构建复习题目失败: {e}")
             return None
     
-    def _get_question_info(self, question_id: str) -> Dict[str, Any]:
-        """获取题目信息"""
-        # TODO: 从数据库查询
-        # 临时返回模拟数据
+    async def _get_question_info(self, db: AsyncSession, question_id: str) -> Dict[str, Any]:
+        """从 questions 表查询题目信息"""
+        from sqlalchemy import select
+        from models.question import Question
+        try:
+            qid = int(question_id) if question_id.isdigit() else 0
+            stmt = select(Question).where(Question.id == qid)
+            result = await db.execute(stmt)
+            q = result.scalar_one_or_none()
+            if q:
+                return {
+                    'id': str(q.id),
+                    'content': q.content,
+                    'knowledge_points': q.knowledge_points or [],
+                    'difficulty': q.difficulty or 0.5,
+                }
+        except Exception:
+            pass
         return {
             'id': question_id,
-            'content': f'题目 {question_id} 内容',
-            'knowledge_points': ['等差数列'],
-            'difficulty': 0.5
+            'content': f'题目 {question_id}',
+            'knowledge_points': [],
+            'difficulty': 0.5,
         }
     
     # ==================== 需求12: 变式题推荐 ====================
@@ -302,10 +318,23 @@ class ReviewQueueService:
             logger.error(f"获取变式题失败: {e}")
             return None
     
-    def _get_user_theta(self, user_id: int) -> float:
-        """获取用户能力值"""
-        # TODO: 从Redis或数据库查询
-        # 临时返回默认值
+    async def _get_user_theta(self, db: AsyncSession, user_id: int) -> float:
+        """从 user_ability_history 查询用户能力值"""
+        from sqlalchemy import select, desc
+        from models.learning_analytics import UserAbilityHistory
+        try:
+            stmt = (
+                select(UserAbilityHistory.theta)
+                .where(UserAbilityHistory.user_id == user_id)
+                .order_by(desc(UserAbilityHistory.recorded_at))
+                .limit(1)
+            )
+            result = await db.execute(stmt)
+            theta = result.scalar_one_or_none()
+            if theta is not None:
+                return theta
+        except Exception:
+            pass
         return 0.0
     
     # ==================== 复习状态更新 ====================

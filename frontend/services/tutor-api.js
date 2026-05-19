@@ -9,35 +9,56 @@ const apiClient = axios.create({
   }
 })
 
-let cachedToken = null
+// 从 localStorage 获取 token
+const getStoredToken = () => {
+  return localStorage.getItem('access_token')
+}
+
+const setStoredToken = (token) => {
+  localStorage.setItem('access_token', token)
+}
 
 const getOrCreateToken = async () => {
-  if (cachedToken) return cachedToken
+  // 先检查本地存储的 token
+  let token = getStoredToken()
+  if (token) {
+    console.log('使用本地存储的token')
+    return token
+  }
+  
+  // 使用固定测试账号，避免每次刷新都注册新用户
+  const username = 'demo_user'
+  const password = 'demo123456'
   
   try {
-    // 1. 尝试注册（用 JSON，不是 FormData）
+    // 1. 尝试注册（如果已存在会返回400，忽略即可）
     try {
       await apiClient.post('/auth/register', {
-        username: 'testuser999',
-        password: 'test123456'
-      })
-      console.log('注册成功')
+        username: username,
+        password: password
+      }, { timeout: 10000 })
+      console.log('注册成功:', username)
     } catch (e) {
-      // 用户已存在或其他错误，忽略
-      console.log('注册跳过:', e.response?.status)
+      if (e.response?.status === 400) {
+        console.log('用户已存在，直接登录:', username)
+      } else {
+        console.log('注册请求失败:', e.message)
+      }
     }
     
     // 2. 登录拿 token
     const res = await apiClient.post('/auth/login', {
-      username: 'testuser999',
-      password: 'test123456'
-    })
+      username: username,
+      password: password
+    }, { timeout: 10000 })
     
-    cachedToken = res.data.access_token
-    console.log('拿到token:', cachedToken)
-    return cachedToken
+    token = res.data.access_token
+    setStoredToken(token)
+    localStorage.setItem('current_username', username)
+    console.log('登录成功，token已保存')
+    return token
   } catch (e) {
-    console.error('获取token失败:', e)
+    console.error('获取token失败:', e.response?.data?.detail || e.message)
     return null
   }
 }

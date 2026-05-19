@@ -10,6 +10,7 @@
     </div>
 
     <div v-else-if="error" class="badge-error">
+      <AlertTriangle :size="16" />
       <span>徽章数据加载失败</span>
       <button @click="fetchBadges">重试</button>
     </div>
@@ -23,14 +24,14 @@
         :title="badgeTooltip(badge)"
       >
         <div class="badge-icon-wrap">
-          <span class="badge-emoji">{{ badge.icon || '⭐' }}</span>
+          <Trophy v-if="badge.earned" :size="28" class="badge-icon earned-icon" />
+          <Lock v-else :size="28" class="badge-icon locked-icon" />
           <span v-if="badge.earned && badge.count && badge.count > 1" class="badge-count">{{ badge.count }}</span>
         </div>
         <div class="badge-info">
           <span class="badge-name">{{ badge.name || badge.badge_id }}</span>
           <span class="badge-condition">{{ badge.description }}</span>
         </div>
-        <!-- 进行中徽章显示进度 -->
         <div v-if="!badge.earned && badge.progress" class="badge-progress-bar">
           <div class="badge-progress-fill" :style="{ width: badge.progress.percentage + '%' }"></div>
         </div>
@@ -44,7 +45,7 @@
     </div>
 
     <div v-if="!loading && !error && badges.length === 0" class="badge-empty">
-      <span>🌟</span>
+      <Sparkles :size="24" />
       <p>还没有获得任何徽章，开始学习吧！</p>
     </div>
   </div>
@@ -52,19 +53,11 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { Trophy, Lock, AlertTriangle, Sparkles } from 'lucide-vue-next'
 
 const loading = ref(false)
 const error = ref('')
 const badges = ref([])
-
-const defaultIcon = (b) => {
-  const t = (b.type || b.name || '').toLowerCase()
-  if (t.includes('连击') || t.includes('streak')) return '🔥'
-  if (t.includes('复习') || t.includes('review')) return '📝'
-  if (t.includes('正确') || t.includes('accuracy')) return '🎯'
-  if (t.includes('坚持') || t.includes('daily')) return '📅'
-  return '⭐'
-}
 
 const badgeTooltip = (b) => {
   if (b.earned) {
@@ -108,60 +101,56 @@ onMounted(fetchBadges)
 
 <style scoped>
 .badge-wall {
-  background: white;
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  background: var(--color-bg-white);
+  border-radius: var(--radius-xl);
+  padding: var(--space-xxl);
+  box-shadow: var(--shadow-sm);
 }
 
-.badge-header { margin-bottom: 16px; }
-.badge-header h3 { font-size: 18px; font-weight: 600; color: #1d1d1f; margin: 0 0 4px; }
-.badge-desc { font-size: 12px; color: #86868b; margin: 0; }
+.badge-header { margin-bottom: var(--space-lg); }
+.badge-header h3 { font-size: var(--font-size-lg); font-weight: 600; color: var(--color-text-title); margin: 0 0 var(--space-xs); }
+.badge-desc { font-size: var(--font-size-xs); color: var(--color-text-secondary); margin: 0; }
 
-.badge-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 10px;
-}
+.badge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: var(--space-sm); }
 
 .badge-card {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
-  padding: 14px 10px; border-radius: 12px;
-  background: #f9fafb; border: 1px solid #e5e7eb;
-  text-align: center; cursor: help; transition: all 0.2s;
+  padding: var(--space-lg) var(--space-sm); border-radius: var(--radius-md);
+  background: var(--color-bg-main); border: 1px solid var(--color-bg-divider);
+  text-align: center; cursor: help; transition: all var(--transition-fast);
 }
-.badge-card.earned { background: linear-gradient(135deg, #fef3c7, #fde68a); border-color: #f59e0b; }
-.badge-card.locked { opacity: 0.55; filter: grayscale(0.6); }
-.badge-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+.badge-card.earned { background: var(--color-warning-bg); border-color: var(--color-warning); }
+.badge-card.locked { opacity: 0.55; }
+.badge-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 
 .badge-icon-wrap { position: relative; }
-.badge-emoji { font-size: 32px; }
+.badge-icon.earned-icon { color: var(--color-warning); }
+.badge-icon.locked-icon { color: var(--color-text-secondary); }
 .badge-count {
   position: absolute; top: -4px; right: -8px;
-  background: #e94560; color: white; font-size: 10px; font-weight: 700;
-  width: 18px; height: 18px; border-radius: 50%; display: flex;
+  background: var(--color-danger); color: var(--color-bg-white); font-size: var(--font-size-xs); font-weight: 700;
+  width: 18px; height: 18px; border-radius: var(--radius-full); display: flex;
   align-items: center; justify-content: center;
 }
 
 .badge-info { display: flex; flex-direction: column; gap: 2px; }
-.badge-name { font-size: 12px; font-weight: 600; color: #1d1d1f; }
-.badge-condition { font-size: 10px; color: #86868b; }
-.badge-progress-bar {
-  width: 100%; height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden;
-}
-.badge-progress-fill { height: 100%; background: #3b82f6; border-radius: 2px; transition: width 0.3s; }
-.badge-progress-text { font-size: 10px; color: #6b7280; }
+.badge-name { font-size: var(--font-size-xs); font-weight: 600; color: var(--color-text-title); }
+.badge-condition { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.badge-progress-bar { width: 100%; height: 4px; background: var(--color-bg-divider); border-radius: 2px; overflow: hidden; }
+.badge-progress-fill { height: 100%; background: var(--color-primary); border-radius: 2px; transition: width var(--transition-base); }
+.badge-progress-text { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.badge-earned-time { font-size: var(--font-size-xs); color: #92400e; }
 
-.badge-earned-time { font-size: 10px; color: #92400e; }
-
-.badge-loading { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.badge-loading { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-sm); }
 .badge-skeleton {
-  height: 100px; border-radius: 12px;
-  background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+  height: 100px; border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--color-bg-divider) 25%, var(--color-bg-main) 50%, var(--color-bg-divider) 75%);
   background-size: 200% 100%; animation: shimmer 1.4s infinite;
 }
 @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 
-.badge-error, .badge-empty { text-align: center; padding: 20px; color: #86868b; }
-.badge-error button { margin-left: 8px; padding: 4px 12px; background: #1d1d1f; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+.badge-error { display: flex; align-items: center; gap: var(--space-sm); justify-content: center; padding: var(--space-xl); color: var(--color-text-secondary); }
+.badge-error button { margin-left: var(--space-sm); padding: var(--space-xs) var(--space-md); background: var(--color-text-title); color: var(--color-bg-white); border: none; border-radius: var(--radius-sm); cursor: pointer; }
+.badge-empty { text-align: center; padding: var(--space-xl); color: var(--color-text-secondary); }
+.badge-empty p { margin-top: var(--space-sm); }
 </style>

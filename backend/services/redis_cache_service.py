@@ -488,35 +488,29 @@ class RedisCacheService:
     
     # ==================== 缓存预热与工具 ====================
     
-    def warm_up_cache(
-        self,
-        user_id: int,
+    async def warm_up_cache(
+        self, db, user_id: int,
         mastery_data: Optional[Dict[str, Dict[str, float]]] = None
     ) -> bool:
-        """
-        缓存预热
-        
-        用户登录时从MySQL加载数据到Redis
-        
-        Args:
-            user_id: 用户ID
-            mastery_data: 掌握度数据（如果为None则从数据库加载）
-        
-        Returns:
-            bool: 是否成功
-        """
+        """缓存预热 - 用户登录时从MySQL加载数据到Redis"""
+        from sqlalchemy import select
+        from models.chat import UserKnowledgeMastery
         try:
             if mastery_data is None:
-                # TODO: 从MySQL加载数据
-                logger.warning(f"缓存预热: 未提供数据，跳过用户={user_id}")
-                return False
-            
-            # 批量缓存掌握度
+                result = await db.execute(
+                    select(UserKnowledgeMastery).where(UserKnowledgeMastery.user_id == user_id))
+                records = result.scalars().all()
+                mastery_data = {}
+                for r in records:
+                    kp_name = str(r.knowledge_point_id)
+                    mastery_data[kp_name] = {'score': r.p_known * 100 if r.p_known else 50,
+                                              'p_known': r.p_known or 0.5}
+                if not mastery_data:
+                    logger.warning(f"缓存预热: 无数据，跳过用户={user_id}")
+                    return False
             self.batch_cache_mastery(user_id, mastery_data)
-            
             logger.info(f"缓存预热完成: 用户={user_id}")
             return True
-            
         except Exception as e:
             logger.error(f"缓存预热失败: {e}")
             return False

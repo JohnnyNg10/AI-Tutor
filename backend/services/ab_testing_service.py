@@ -123,19 +123,42 @@ class ABTestingService:
             return ExperimentGroup.CONTROL
     
     def get_user_group(self, user_id: int) -> Optional[ExperimentGroup]:
-        """获取用户所属实验组"""
+        """获取用户所属实验组（Redis 优先）"""
         try:
             group_key = self.ABTEST_GROUP_KEY.format(user_id=user_id)
             group_value = self.redis_service.redis_client.get(group_key)
-            
+
             if group_value:
                 return ExperimentGroup(group_value)
-            
+
             return None
-            
+
         except Exception as e:
             logger.error(f"获取用户实验组失败: {e}")
             return None
+
+    async def get_user_group_from_db(self, db, user_id: int) -> Optional[str]:
+        """从 MySQL users 表读取实验组（持久化回退）"""
+        try:
+            from sqlalchemy import select
+            from models.user import User
+            stmt = select(User.experiment_group).where(User.id == user_id)
+            result = await db.execute(stmt)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"从DB获取实验组失败: {e}")
+            return None
+
+    async def sync_group_to_db(self, db, user_id: int, group: str) -> None:
+        """将实验组写入 MySQL（持久化）"""
+        try:
+            from sqlalchemy import update
+            from models.user import User
+            stmt = update(User).where(User.id == user_id).values(experiment_group=group)
+            await db.execute(stmt)
+            await db.commit()
+        except Exception as e:
+            logger.error(f"同步实验组到DB失败: {e}")
     
     def get_or_assign_group(self, user_id: int) -> ExperimentGroup:
         """获取或分配用户到实验组"""

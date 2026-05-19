@@ -11,47 +11,39 @@
     </div>
 
     <div v-else-if="error" class="pa-error">
+      <AlertTriangle :size="16" />
       <span>数据加载失败</span>
       <button @click="fetchData">重试</button>
     </div>
 
     <div v-else-if="!hasData" class="pa-empty">
-      <span>📭</span>
+      <Inbox :size="24" />
       <p>还没有练习数据，无法分析雷区</p>
     </div>
 
     <div v-else class="pa-grid">
-      <!-- 雷区列 -->
       <div class="pa-col pitfalls-col">
-        <h4 class="col-title">⚠️ 易错雷区</h4>
+        <h4 class="col-title">易错雷区</h4>
         <div v-if="pitfalls.length === 0" class="col-empty">暂无雷区数据</div>
-        <div
-          v-for="p in pitfalls"
-          :key="p.type || p.name"
-          class="pa-card pitfall-card"
-        >
+        <div v-for="p in pitfalls" :key="p.type || p.name" class="pa-card pitfall-card">
           <div class="card-header">
             <span class="card-type">{{ p.type || p.name }}</span>
             <span class="card-count">{{ p.count || p.error_count || 0 }}次</span>
           </div>
           <div v-if="p.suggestion || p.recovery_tip" class="card-tip">
-            💡 {{ p.suggestion || p.recovery_tip }}
+            {{ p.suggestion || p.recovery_tip }}
           </div>
         </div>
       </div>
 
-      <!-- 成就列 -->
       <div class="pa-col achievements-col">
-        <h4 class="col-title">🏆 攻克成就</h4>
+        <h4 class="col-title">攻克成就</h4>
         <div v-if="achievements.length === 0" class="col-empty">暂无攻克成就</div>
-        <div
-          v-for="a in achievements"
-          :key="a.type || a.name"
-          class="pa-card achievement-card"
-        >
+        <div v-for="a in achievements" :key="a.type || a.name" class="pa-card achievement-card">
           <div class="card-header">
             <span class="card-type">{{ a.type || a.name }}</span>
-            <span class="card-status">{{ a.achieved ? '✅' : '🔒' }}</span>
+            <CheckCircle2 v-if="a.achieved" :size="16" class="achieved-icon" />
+            <Lock v-else :size="16" class="locked-icon" />
           </div>
           <div v-if="a.description" class="card-tip">{{ a.description }}</div>
         </div>
@@ -62,6 +54,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { AlertTriangle, Inbox, CheckCircle2, Lock } from 'lucide-vue-next'
 
 const loading = ref(false)
 const error = ref('')
@@ -104,53 +97,56 @@ onMounted(fetchData)
 
 <style scoped>
 .pitfall-achievement {
-  background: white;
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  background: var(--color-bg-white);
+  border-radius: var(--radius-xl);
+  padding: var(--space-xxl);
+  box-shadow: var(--shadow-sm);
 }
 
-.pa-header { margin-bottom: 16px; }
-.pa-header h3 { font-size: 18px; font-weight: 600; color: #1d1d1f; margin: 0 0 4px; }
-.pa-desc { font-size: 12px; color: #86868b; margin: 0; }
+.pa-header { margin-bottom: var(--space-lg); }
+.pa-header h3 { font-size: var(--font-size-lg); font-weight: 600; color: var(--color-text-title); margin: 0 0 var(--space-xs); }
+.pa-desc { font-size: var(--font-size-xs); color: var(--color-text-secondary); margin: 0; }
 
-.pa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.pa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-lg); }
 
-.pa-col { display: flex; flex-direction: column; gap: 8px; }
+.pa-col { display: flex; flex-direction: column; gap: var(--space-sm); }
 .col-title {
-  font-size: 14px; font-weight: 600; margin: 0 0 4px;
-  padding-bottom: 8px; border-bottom: 2px solid #e5e7eb;
+  font-size: var(--font-size-base); font-weight: 600; margin: 0 0 var(--space-xs);
+  padding-bottom: var(--space-sm); border-bottom: 2px solid var(--color-bg-divider);
 }
-.pitfalls-col .col-title { color: #dc2626; border-bottom-color: #fca5a5; }
-.achievements-col .col-title { color: #059669; border-bottom-color: #6ee7b7; }
+.pitfalls-col .col-title { color: var(--color-danger); border-bottom-color: var(--color-danger-border); }
+.achievements-col .col-title { color: var(--color-success); border-bottom-color: var(--color-success-border); }
 
 .pa-card {
-  padding: 12px 14px; border-radius: 10px;
-  border: 1px solid #e5e7eb; transition: all 0.2s;
+  padding: var(--space-md); border-radius: var(--radius-md);
+  border: 1px solid var(--color-bg-divider); transition: all var(--transition-fast);
 }
-.pa-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.05); }
-.pitfall-card { background: #fef2f2; border-color: #fecaca; }
-.achievement-card { background: #f0fdf4; border-color: #bbf7d0; }
+.pa-card:hover { box-shadow: var(--shadow-sm); }
+.pitfall-card { background: var(--color-danger-bg); border-color: var(--color-danger-border); }
+.achievement-card { background: var(--color-success-bg); border-color: var(--color-success-border); }
 
 .card-header { display: flex; justify-content: space-between; align-items: center; }
-.card-type { font-size: 13px; font-weight: 600; color: #1d1d1f; }
-.card-count { font-size: 12px; font-weight: 700; color: #dc2626; }
-.card-status { font-size: 14px; }
+.card-type { font-size: var(--font-size-sm); font-weight: 600; color: var(--color-text-title); }
+.card-count { font-size: var(--font-size-xs); font-weight: 700; color: var(--color-danger); }
+.achieved-icon { color: var(--color-success); }
+.locked-icon { color: var(--color-text-secondary); }
 
-.card-tip { font-size: 11px; color: #6b7280; margin-top: 6px; line-height: 1.5; }
+.card-tip { font-size: var(--font-size-xs); color: var(--color-text-secondary); margin-top: 6px; line-height: 1.5; }
 
-.col-empty { text-align: center; padding: 16px; color: #9ca3af; font-size: 13px; }
+.col-empty { text-align: center; padding: var(--space-lg); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 
-.pa-loading { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+.pa-loading { display: grid; gap: var(--space-md); grid-template-columns: 1fr 1fr; }
 .pa-skeleton {
-  height: 80px; border-radius: 12px;
-  background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+  height: 80px; border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--color-bg-divider) 25%, var(--color-bg-main) 50%, var(--color-bg-divider) 75%);
   background-size: 200% 100%; animation: shimmer 1.4s infinite;
 }
 @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 
-.pa-error, .pa-empty { text-align: center; padding: 20px; color: #86868b; }
-.pa-error button { margin-left: 8px; padding: 4px 12px; background: #1d1d1f; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+.pa-error { display: flex; align-items: center; gap: var(--space-sm); justify-content: center; padding: var(--space-xl); color: var(--color-text-secondary); }
+.pa-error button { margin-left: var(--space-sm); padding: var(--space-xs) var(--space-md); background: var(--color-text-title); color: var(--color-bg-white); border: none; border-radius: var(--radius-sm); cursor: pointer; }
+.pa-empty { text-align: center; padding: var(--space-xl); color: var(--color-text-secondary); }
+.pa-empty p { margin-top: var(--space-sm); }
 
 @media (max-width: 768px) {
   .pa-grid { grid-template-columns: 1fr; }

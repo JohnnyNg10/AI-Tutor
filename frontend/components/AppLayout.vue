@@ -1,21 +1,19 @@
 <template>
   <div class="app-layout">
     <AppSidebar
-      :collapsed="sidebarCollapsed"
       :user-name="userName"
       :user-avatar="userAvatar"
-      :hide-avatar="hideAvatar"
-      @toggle="sidebarCollapsed = !sidebarCollapsed"
+      @toggle="onSidebarToggle"
       @user-click="toggleUserOverlay"
     >
-      <template v-if="$slots['new-chat'] && !sidebarCollapsed" #new-chat>
+      <template v-if="$slots['new-chat']" #new-chat>
         <slot name="new-chat"></slot>
       </template>
-      <template v-if="$slots['history'] && !sidebarCollapsed" #history>
+      <template v-if="$slots['history']" #history>
         <slot name="history"></slot>
       </template>
     </AppSidebar>
-    <main class="main-content">
+    <main class="main-content" :style="{ marginLeft: sidebarCollapsed ? '64px' : 'var(--sidebar-width)' }">
       <slot />
     </main>
 
@@ -94,6 +92,10 @@ const userAvatar = ref('')
 
 const showUserOverlay = ref(false)
 
+const onSidebarToggle = (collapsed) => {
+  sidebarCollapsed.value = collapsed
+}
+
 const toggleUserOverlay = () => {
   showUserOverlay.value = !showUserOverlay.value
 }
@@ -143,6 +145,7 @@ provide('toggleUserOverlay', toggleUserOverlay)
   overflow-x: hidden;
   background: var(--color-bg-main);
   min-width: 0;
+  transition: margin-left var(--transition-slow);
 }
 
 /* ---- User Dropdown Overlay ---- */

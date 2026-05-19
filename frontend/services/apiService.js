@@ -248,6 +248,18 @@ export const chatAPI = {
         knowledge_points: knowledgePoints ?? [],
       }),
     }),
+
+  /** 生成分级提示 (L1-L4)，调用 Instructor 引擎 */
+  generateHint: ({ hintLevel, questionContent, knowledgePoints = [], studentMessage = '' } = {}) =>
+    request('/llm/generate-hint', {
+      method: 'POST',
+      body: JSON.stringify({
+        hint_level: hintLevel,
+        question_content: questionContent,
+        knowledge_points: knowledgePoints,
+        student_message: studentMessage || undefined,
+      }),
+    }),
 }
 
 export const errorDiagnosisAPI = {

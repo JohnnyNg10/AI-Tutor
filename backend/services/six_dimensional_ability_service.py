@@ -28,6 +28,8 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from services.redis_service import RedisService
 from utils.logger import logger
 
@@ -400,19 +402,55 @@ class SixDimensionalAbilityService:
         
         return min(100, max(0, score))
     
-    # ==================== 数据获取（模拟） ====================
-    
-    def _get_user_interaction_logs(self, user_id: int) -> List[Dict]:
-        """获取用户交互日志"""
-        # TODO: 从数据库查询user_interaction_logs表
-        # 临时返回模拟数据
-        return []
-    
-    def _get_user_ability_history(self, user_id: int) -> List[Dict]:
-        """获取用户能力历史"""
-        # TODO: 从数据库查询user_ability_history表
-        # 临时返回模拟数据
-        return []
+    # ==================== 数据获取 ====================
+
+    async def _get_user_interaction_logs(self, db: AsyncSession, user_id: int) -> List[Dict]:
+        """从 user_interaction_logs 表查询交互日志"""
+        from sqlalchemy import select, desc
+        from models.learning_analytics import UserInteractionLog
+        try:
+            stmt = (
+                select(UserInteractionLog)
+                .where(UserInteractionLog.user_id == user_id)
+                .order_by(desc(UserInteractionLog.created_at))
+                .limit(100)
+            )
+            result = await db.execute(stmt)
+            records = result.scalars().all()
+            return [
+                {
+                    'interaction_type': r.interaction_type,
+                    'knowledge_points': r.knowledge_points,
+                    'sentiment_tag': r.sentiment_tag,
+                    'created_at': r.created_at.isoformat() if r.created_at else '',
+                }
+                for r in records
+            ]
+        except Exception:
+            return []
+
+    async def _get_user_ability_history(self, db: AsyncSession, user_id: int) -> List[Dict]:
+        """从 user_ability_history 表查询能力历史"""
+        from sqlalchemy import select
+        from models.learning_analytics import UserAbilityHistory
+        try:
+            stmt = (
+                select(UserAbilityHistory)
+                .where(UserAbilityHistory.user_id == user_id)
+                .order_by(UserAbilityHistory.recorded_at.desc())
+                .limit(30)
+            )
+            result = await db.execute(stmt)
+            records = result.scalars().all()
+            return [
+                {
+                    'theta': r.theta,
+                    'recorded_at': r.recorded_at.isoformat() if r.recorded_at else '',
+                }
+                for r in records
+            ]
+        except Exception:
+            return []
     
     def _cache_ability(self, user_id: int, ability: SixDimensionalAbility) -> None:
         """缓存能力数据"""
@@ -475,7 +513,7 @@ class SixDimensionalAbilityService:
                 level=level,
                 description=description,
                 suggestions=suggestions,
-                trend='stable'  # TODO: 计算趋势
+                trend=('improving' if history and len(history) >= 2 and history[-1].get('theta', 0) > history[0].get('theta', 0) else 'stable')
             )
             
         except Exception as e:

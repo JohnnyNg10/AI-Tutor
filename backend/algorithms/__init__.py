@@ -137,22 +137,10 @@ try:
 except ImportError:
     pass  # Redis可选依赖
 
-# 尝试导入Advisor Agent
+# Agent 模块已迁移至 agent/ 目录
 try:
-    from agents.advisor_agent import (
-        AdvisorAgent,
-        AdvisorMode,
-        UserLearningState,
-        AdvisorInstruction,
-        get_advisor_agent
-    )
-    __all__.extend([
-        'AdvisorAgent',
-        'AdvisorMode',
-        'UserLearningState',
-        'AdvisorInstruction',
-        'get_advisor_agent'
-    ])
+    from agent.advisor import get_advisor_recommendations
+    __all__.extend(['get_advisor_recommendations'])
 except ImportError:
     pass  # Advisor可选依赖
 

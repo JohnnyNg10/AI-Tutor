@@ -19,6 +19,11 @@ from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import math
+import sys, os
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DIR = os.path.dirname(CURRENT_DIR)
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 
 
 @dataclass
@@ -149,63 +154,59 @@ class MemoryDecayCronJob:
             decay_factor=decay_factor
         )
     
-    def execute_cron_job(
+    async def execute_cron_job(
         self,
+        db,
         current_time: datetime = None
     ) -> Dict:
-        """
-        执行定时任务（主入口）
-        
-        实际生产环境：
-        1. 从MySQL查询所有需要衰减的记录
-        2. 批量计算衰减
-        3. 批量更新MySQL
-        4. 同步更新Redis缓存
-        
-        Args:
-            current_time: 当前时间（用于测试）
-            
-        Returns:
-            执行结果统计
-        """
+        """执行定时任务(主入口) - 真实DB操作"""
         if current_time is None:
             current_time = datetime.now()
-        
         print(f"[{current_time}] 开始执行记忆衰减定时任务...")
-        
-        # TODO: 实际生产环境代码
-        # 1. 查询MySQL：SELECT * FROM user_knowledge_mastery 
-        #    WHERE last_practiced_at < NOW() - INTERVAL 1 DAY
-        # 2. 批量计算衰减
-        # 3. 批量更新：UPDATE user_knowledge_mastery SET p_known = ...
-        # 4. 同步Redis：DEL ai:tutor:mastery:{uid} 或 HMSET更新
-        
-        # Mock执行结果
-        mock_results = self._mock_execute(current_time)
-        
-        summary = {
+        return await self.execute_cron_job_real(db)
+    
+    async def execute_cron_job_real(self, db) -> Dict:
+        """真实DB执行 - 调用 cognitive_diagnosis_service 的衰减逻辑"""
+        from services.cognitive_diagnosis_service import cognitive_service
+        from models.chat import UserKnowledgeMastery
+        from sqlalchemy import select
+        current_time = datetime.now()
+        stmt = select(UserKnowledgeMastery).limit(500)
+        result = await db.execute(stmt)
+        records = result.scalars().all()
+        results = []
+        for ukm in records:
+            p_before = ukm.p_known or 0.5
+            days = 0
+            if ukm.last_practiced_at:
+                days = (current_time - ukm.last_practiced_at).days
+            if days < 1:
+                continue
+            p_after = cognitive_service.memory_decay.compute_decay(p_before, days)
+            ukm.p_known = p_after
+            results.append(DecayResult(
+                user_id=ukm.user_id,
+                knowledge_point_id=ukm.knowledge_point_id,
+                p_known_before=p_before,
+                p_known_after=p_after,
+                days_passed=days,
+                decay_factor=p_after / p_before if p_before > 0 else 0
+            ))
+        await db.commit()
+        return {
             "execution_time": current_time.isoformat(),
-            "total_processed": len(mock_results),
-            "total_decayed": len([r for r in mock_results if r.p_known_after < r.p_known_before]),
+            "total_processed": len(results),
+            "total_decayed": sum(1 for r in results if r.p_known_after < r.p_known_before),
             "results": [
-                {
-                    "user_id": r.user_id,
-                    "knowledge_point_id": r.knowledge_point_id,
-                    "p_known_before": round(r.p_known_before, 4),
-                    "p_known_after": round(r.p_known_after, 4),
-                    "days_passed": r.days_passed,
-                    "decay_factor": round(r.decay_factor, 4)
-                }
-                for r in mock_results
+                {"user_id": r.user_id, "knowledge_point_id": r.knowledge_point_id,
+                 "p_known_before": round(r.p_known_before, 4), "p_known_after": round(r.p_known_after, 4),
+                 "days_passed": r.days_passed, "decay_factor": round(r.decay_factor, 4)}
+                for r in results
             ]
         }
-        
-        print(f"[{current_time}] 定时任务执行完成，处理了 {summary['total_processed']} 条记录")
-        
-        return summary
-    
+
     def _mock_execute(self, current_time: datetime) -> List[DecayResult]:
-        """Mock执行（用于测试）"""
+        """Mock execution for testing"""
         results = []
         
         # Mock数据：模拟一些需要衰减的记录
@@ -234,25 +235,16 @@ class MemoryDecayCronJob:
         
         return results
     
-    def sync_redis_cache(self, user_id: int) -> bool:
-        """
-        同步Redis缓存
-        
-        策略：
-        1. 删除Redis中的缓存（下次读取时从MySQL加载）
-        2. 或主动更新Redis中的值
-        
-        Args:
-            user_id: 用户ID
-            
-        Returns:
-            是否同步成功
-        """
-        # TODO: 实际生产环境代码
-        # redis_key = f"ai:tutor:mastery:{user_id}"
-        # redis.delete(redis_key)  # 删除缓存，下次从MySQL加载
-        
-        print(f"  已同步Redis缓存: ai:tutor:mastery:{user_id}")
+    async def sync_redis_cache(self, user_id: int) -> bool:
+        """同步Redis缓存 - 删除缓存标记, 下次从MySQL加载"""
+        try:
+            from utils.redis_client import get_redis, is_redis_available
+            if is_redis_available():
+                r = await get_redis()
+                redis_key = f"ai:tutor:mastery:{user_id}"
+                await r.delete(redis_key)
+        except Exception:
+            pass
         return True
     
     def get_next_execution_time(self, current_time: datetime = None) -> datetime:

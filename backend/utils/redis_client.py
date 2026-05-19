@@ -25,18 +25,54 @@ from utils.logger import logger
 # ---------------------------------------------------------------------------
 
 _redis: Optional[aioredis.Redis] = None
+_redis_available: bool = True  # 缓存 Redis 可用状态，首次失败后快速跳过
+_redis_check_time: float = 0.0
+
+
+async def is_redis_available() -> bool:
+    """快速检查 Redis 是否可用（每 30 秒重试一次）"""
+    global _redis_available, _redis_check_time
+    if not _redis_available:
+        now = time.time()
+        if now - _redis_check_time < 30:
+            return False
+        _redis_check_time = now
+    return True
+
+
+def mark_redis_unavailable():
+    """标记 Redis 不可用"""
+    global _redis_available, _redis_check_time
+    _redis_available = False
+    _redis_check_time = time.time()
+    logger.warning("Redis 不可用，切换到离线模式")
 
 
 async def get_redis() -> aioredis.Redis:
-    global _redis
+    global _redis, _redis_available, _redis_check_time
+    if not _redis_available:
+        now = time.time()
+        if now - _redis_check_time < 30:
+            raise Exception("Redis unavailable (cached)")
+        _redis_check_time = now
     if _redis is None:
-        _redis = aioredis.from_url(
-            settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-            socket_connect_timeout=3,
-            socket_timeout=3,
-        )
+        try:
+            _redis = aioredis.from_url(
+                settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+            )
+            # Test connection
+            await _redis.ping()
+            _redis_available = True
+        except Exception:
+            _redis = None
+            _redis_available = False
+            _redis_check_time = time.time()
+            logger.warning("Redis 不可用，切换到离线模式")
+            raise Exception("Redis unavailable")
     return _redis
 
 

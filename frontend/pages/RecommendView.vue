@@ -29,6 +29,14 @@
         </div>
       </div>
 
+      <!-- 学习目标头部 -->
+      <LearningGoalHeader
+        v-if="learningGoal && !loading && recommendations.length > 0"
+        :goal="learningGoal"
+        :completed="currentIndex"
+        :total="recommendations.length"
+      />
+
       <!-- 操作栏 -->
       <div class="action-bar">
         <select v-model="limit" class="limit-select">
@@ -99,6 +107,13 @@
         <!-- ===== 答题区：未提交 ===== -->
         <template v-if="!currentResult">
 
+          <!-- 提示按钮栏 (L0-L4) -->
+          <HintButtonBar
+            :question-id="currentQ.id"
+            :used-hint-levels="usedHints[currentQ.id] || []"
+            @requestHint="(level) => requestHint(currentQ, level)"
+          />
+
           <!-- 选择题 -->
           <div v-if="isChoice(currentQ)" class="card-actions">
             <div class="choice-options">
@@ -126,10 +141,14 @@
 
           <!-- 大题 -->
           <div v-else class="card-actions">
+            <OCRUploader
+              :question-id="currentQ.id"
+              @ocrComplete="(text) => { answerMap[currentQ.id] = text }"
+            />
             <textarea
               v-model="answerMap[currentQ.id]"
               class="answer-textarea"
-              placeholder="请写出你的解题过程和答案…（提交后将由AI批改）"
+              placeholder="请写出你的解题过程和答案…（也可拍照上传手写草稿）"
               rows="5"
             ></textarea>
             <div class="btn-group">
@@ -160,7 +179,7 @@
             </button>
           </div>
 
-          <!-- 答错 -->
+          <!-- 答错 → RetryPanel (结构化诊断+引导重试) -->
           <div v-else class="result-wrong">
             <div class="result-icon"> </div>
             <div class="result-wrong-msg">
@@ -168,20 +187,26 @@
               <span v-if="currentResult.correctKey">（正确答案：{{ currentResult.correctKey }}）</span>
             </div>
 
-            <!-- 解析 -->
+            <!-- AI 解析 -->
             <div v-if="currentResult.feedback" class="analysis-card">
               <div class="analysis-title">AI 解析</div>
               <div class="analysis-body" v-html="renderMath(currentResult.feedback)"></div>
             </div>
 
-            <!-- AI 指出问题 -->
-            <div v-if="currentResult.diagnosis" class="diagnosis-card">
-              <div class="analysis-title">问题所在</div>
-              <div class="analysis-body" v-html="renderMath(currentResult.diagnosis)"></div>
-            </div>
+            <!-- 结构化错因诊断 + 引导重试 -->
+            <RetryPanel
+              v-if="currentResult.errorDiagnosis"
+              :diagnosis="currentResult.errorDiagnosis"
+              @retry="retryCurrentQuestion"
+              @showAnswer="showFullAnswer"
+              @skip="goNext"
+            />
+
+            <!-- 诊断加载中 -->
             <div v-else-if="diagnosing" class="diagnosis-loading">AI 正在分析你的问题…</div>
 
-            <button class="act-btn next-btn wrong-next" @click="goNext">
+            <!-- 无诊断时也提供跳过按钮 -->
+            <button v-if="!currentResult.errorDiagnosis && !diagnosing" class="act-btn next-btn wrong-next" @click="goNext">
               {{ isLast ? '查看本轮总结' : '下一题' }}
             </button>
           </div>
@@ -189,18 +214,22 @@
       </div>
 
       <!-- ===== 全部完成总结 ===== -->
-      <div v-if="!loading && recommendations.length > 0 && allDone" class="all-done">
-        <div class="done-emoji"> </div>
-        <p class="done-title">本轮完成！</p>
-        <div class="done-stats">
-          <span class="done-stat correct">答对 {{ correctCount }} 题</span>
-          <span class="done-stat wrong">答错 {{ wrongCount }} 题</span>
-          <span class="done-stat skip">跳过 {{ skipCount }} 题</span>
-        </div>
-        <div class="done-accuracy">正确率 {{ doneAccuracy }}%</div>
-        <button class="primary-btn mt-16" @click="loadRecommendations">继续下一批</button>
-      </div>
+      <RoundSummary
+        v-if="!loading && recommendations.length > 0 && allDone"
+        :summary="roundSummaryData"
+        @continue="loadRecommendations"
+        @focusWeak="(kp) => loadRecommendations()"
+      />
     </div>
+    <!-- Hint Popup -->
+    <HintPopup
+      :visible="hintPopup.visible"
+      :loading="hintPopup.loading"
+      :level="hintPopup.level"
+      :content-html="hintPopup.contentHtml"
+      @close="closeHintPopup"
+      @reopen=""
+    />
   </AppLayout>
 </template>
 
@@ -208,6 +237,12 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Sparkles } from 'lucide-vue-next'
 import AppLayout from '../components/AppLayout.vue'
+import LearningGoalHeader from '../components/recommend/LearningGoalHeader.vue'
+import HintButtonBar from '../components/recommend/HintButtonBar.vue'
+import HintPopup from '../components/recommend/HintPopup.vue'
+import OCRUploader from '../components/recommend/OCRUploader.vue'
+import RetryPanel from '../components/recommend/RetryPanel.vue'
+import RoundSummary from '../components/recommend/RoundSummary.vue'
 import { advisorAPI, chatAPI } from '../services/apiService'
 import katex from 'katex'
 
@@ -254,6 +289,26 @@ const profileSnap = reactive({
 })
 const advisorMode = ref('')
 const advisorInstruction = ref(null)
+const learningGoal = ref(null)
+
+// 提示系统
+const usedHints = reactive({})       // { questionId: [1, 2, ...] }
+const hintCache = reactive({})       // { `${questionId}_${level}`: "hint text" }
+
+// Hint popup state
+const hintPopup = reactive({
+  visible: false,
+  loading: false,
+  level: 1,
+  contentHtml: '',
+})
+
+// 错因诊断缓存
+const errorDiagnosisResults = reactive({})  // { questionId: ErrorDiagnosisResult }
+
+// 本轮统计
+const roundErrorTypes = reactive({}) // { error_type: count }
+const roundMasteryChanges = reactive([])  // [{ kp_name, before, after, change }]
 
 // 计算属性
 const advisorModeClass = computed(() => ({
@@ -271,6 +326,22 @@ const modeName = computed(() => ({
   MODE_CHALLENGE: '挑战模式 — 自主探索',
   MODE_ENCOURAGE: '鼓励模式 — 适度引导',
 }[advisorMode.value] || '智能模式'))
+
+const roundSummaryData = computed(() => {
+  const total = correctCount.value + wrongCount.value
+  return {
+    correct_count: correctCount.value,
+    wrong_count: wrongCount.value,
+    skipped_count: skipCount.value,
+    accuracy: total ? Math.round(correctCount.value / total * 100) : 0,
+    mastery_changes: roundMasteryChanges.filter(mc => Math.abs(mc.change) > 0.01),
+    error_distribution: { ...roundErrorTypes },
+    weakest_kp: learningGoal.value?.focus_knowledge_points?.[0] || null,
+    next_suggestion: correctCount.value > wrongCount.value
+      ? '继续保持！建议挑战更高难度的题目。'
+      : '建议重点复习薄弱知识点后再来挑战。',
+  }
+})
 
 const pct = (v) => v != null ? (v * 100).toFixed(0) + '%' : '-'
 const diffClass = (d) => d <= 1 ? 'easy' : d <= 2 ? 'medium' : d <= 3 ? 'hard' : 'expert'
@@ -436,24 +507,122 @@ const submitEssayAnswer = async (item) => {
   }
 }
 
-// -------- 答错时向 AI 请求诊断 --------
+// -------- 答错时向 AI 请求结构化诊断 --------
 const _requestDiagnosis = async (item, chosenKey, userAnswer) => {
   diagnosing.value = true
   try {
     const userInput = chosenKey ? `选了 ${chosenKey}` : (userAnswer || '')
-    const res = await chatAPI.diagnose({
+    const token = localStorage.getItem('access_token')
+
+    // 使用新的结构化诊断 API
+    const res = await fetch('/api/error-classification/diagnose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        question_text: item.content,
+        standard_answer: item.standard_answer || '',
+        student_answer: userInput,
+        knowledge_points: item.knowledge_points || [],
+        user_mastery: profileSnap.knowledge_mastery || {},
+        hint_levels_used: (usedHints[item.id] || []).length,
+      })
+    })
+
+    if (res.ok) {
+      const data = await res.json()
+      if (data.success && data.diagnosis) {
+        errorDiagnosisResults[item.id] = data.diagnosis
+        if (currentResult.value) {
+          currentResult.value = { ...currentResult.value, errorDiagnosis: data.diagnosis }
+        }
+        // 统计错因类型
+        const et = data.diagnosis.primary_error_type
+        roundErrorTypes[et] = (roundErrorTypes[et] || 0) + 1
+        return
+      }
+    }
+
+    // 降级：使用旧 API
+    const oldRes = await chatAPI.diagnose({
       questionContent: item.content,
       standardAnswer: item.standard_answer || null,
       userAnswer: userInput,
       knowledgePoints: item.knowledge_points || [],
     })
-    const text = res?.diagnosis || ''
+    const text = oldRes?.diagnosis || ''
     if (currentResult.value && text) {
       currentResult.value = { ...currentResult.value, diagnosis: text }
     }
   } catch { /* 诊断失败不阻塞 */ } finally {
     diagnosing.value = false
   }
+}
+
+// -------- L0-L4 提示请求 --------
+const levelLabels = { 1: '方向', 2: '公式', 3: '步骤', 4: '解析' }
+const requestHint = async (item, level) => {
+  const cacheKey = `${item.id}_${level}`
+
+  // 打开 popup
+  hintPopup.visible = true
+  hintPopup.level = level
+  hintPopup.loading = true
+  hintPopup.contentHtml = ''
+
+  if (hintCache[cacheKey]) {
+    hintPopup.loading = false
+    hintPopup.contentHtml = renderMath(hintCache[cacheKey])
+    if (!usedHints[item.id]) usedHints[item.id] = []
+    if (!usedHints[item.id].includes(level)) usedHints[item.id].push(level)
+    return
+  }
+
+  try {
+    const res = await chatAPI.generateHint({
+      hintLevel: level,
+      questionContent: item.content,
+      knowledgePoints: item.knowledge_points || [],
+    })
+    const text = res?.content || res?.hint || ''
+    hintCache[cacheKey] = text
+    hintPopup.contentHtml = renderMath(text)
+    if (!usedHints[item.id]) usedHints[item.id] = []
+    if (!usedHints[item.id].includes(level)) usedHints[item.id].push(level)
+  } catch {
+    hintPopup.contentHtml = '<p style="color:#86868B">提示生成失败，请重试</p>'
+  } finally {
+    hintPopup.loading = false
+  }
+}
+
+const closeHintPopup = () => {
+  hintPopup.visible = false
+  hintPopup.contentHtml = ''
+}
+
+// -------- 重试当前题 --------
+const retryCurrentQuestion = () => {
+  const item = currentQ.value
+  if (!item) return
+  currentResult.value = null
+  selectedChoice[item.id] = null
+  answerMap[item.id] = ''
+}
+
+// -------- 查看完整解析 --------
+const showFullAnswer = async () => {
+  const item = currentQ.value
+  if (!item) return
+  try {
+    const res = await chatAPI.generateHint({
+      questionContent: item.content,
+      standardAnswer: item.standard_answer || '',
+      hintLevel: 4,
+      knowledgePoints: item.knowledge_points || [],
+    })
+    const text = res?.hint || res?.content || item.standard_answer || '暂无解析'
+    currentResult.value = { ...currentResult.value, feedback: (currentResult.value?.feedback || '') + '\n\n【完整解析】\n' + text }
+  } catch { /* 失败静默 */ }
 }
 
 // -------- 下一题 --------
@@ -540,8 +709,12 @@ const loadRecommendations = async () => {
     recommendations.value = data.recommendations || []
     advisorMode.value = data.advisor_mode || ''
     advisorInstruction.value = data.advisor_instruction || null
+    learningGoal.value = data.learning_goal || null
     const snap = data.profile_snapshot || {}
     Object.assign(profileSnap, snap)
+    // 重置本轮统计
+    Object.keys(roundErrorTypes).forEach(k => delete roundErrorTypes[k])
+    roundMasteryChanges.splice(0)
   } catch (e) {
     error.value = e?.message || '获取推荐失败，请重试'
     recommendations.value = []

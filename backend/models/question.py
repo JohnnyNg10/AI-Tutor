@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database.db import Base
@@ -29,9 +29,18 @@ class Question(Base):
     # 例如："single_choice", "multiple_choice", "fill_blank"
     question_type = Column(String(50), nullable=True, comment="题型")
 
-    # 6. 时间戳
+    # 6. 题目来源 (新增)
+    # system: 系统题库（开发时导入的正式题目）
+    # user_uploaded: 用户上传的题目
+    source = Column(String(20), default="user_uploaded", comment="题目来源: system(系统题库), user_uploaded(用户上传)")
+
+    # 7. 是否有效 (新增，用于软删除和审核)
+    # 审核不通过的题目标记为 False，不推荐给用户
+    is_active = Column(Boolean, default=True, comment="是否有效: 用于审核不通过的题目")
+
+    # 8. 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # 关系
-    user = relationship("User")
-    learning_records = relationship("LearningRecord", back_populates="question")
+    user = relationship("User", lazy="joined")
+    learning_records = relationship("LearningRecord", back_populates="question", lazy="selectin")

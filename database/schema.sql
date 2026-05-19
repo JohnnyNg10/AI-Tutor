@@ -162,6 +162,9 @@ CREATE TABLE IF NOT EXISTS `user_knowledge_mastery` (
 
 -- ==================== V3 扩展字段 ====================
 
+-- users 表扩展（A/B测试）
+ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `experiment_group` VARCHAR(2) NULL COMMENT 'A/B测试分组：A=V2对照组, B=V3实验组';
+
 -- learning_records 表扩展
 ALTER TABLE `learning_records` ADD COLUMN IF NOT EXISTS `source_type` VARCHAR(50) NOT NULL DEFAULT 'recommended';
 ALTER TABLE `learning_records` ADD COLUMN IF NOT EXISTS `custom_question_data` JSON NULL;

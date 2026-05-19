@@ -25,6 +25,8 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from services.redis_service import RedisService
 from utils.logger import logger
 
@@ -178,26 +180,57 @@ class ErrorClassificationService:
             logger.error(f"分类错题失败: {e}")
             return {}
     
-    def _get_user_wrong_questions(self, user_id: int) -> List[Dict]:
-        """获取用户错题"""
-        # TODO: 从数据库查询
-        # 临时返回模拟数据
-        return [
-            {
-                'question_id': 'q001',
-                'question_title': '等差数列求和',
-                'error_category': 'calculation_error',
-                'error_analysis': '最后一步计算出错',
-                'created_at': datetime.now().isoformat()
-            },
-            {
-                'question_id': 'q002',
-                'question_title': '等比数列通项',
-                'error_category': 'formula_error',
-                'error_analysis': '记错了等比数列通项公式',
-                'created_at': datetime.now().isoformat()
-            }
-        ]
+    async def _get_user_wrong_questions(self, db: AsyncSession, user_id: int) -> List[Dict]:
+        """从 learning_records + questions 查询用户错题"""
+        from sqlalchemy import select, desc
+        from models.record import LearningRecord
+        stmt = (
+            select(LearningRecord)
+            .where(LearningRecord.user_id == user_id)
+            .where(LearningRecord.is_correct == False)
+            .order_by(desc(LearningRecord.created_at))
+            .limit(100)
+        )
+        result = await db.execute(stmt)
+        records = result.scalars().all()
+
+        questions = []
+        for r in records:
+            category = 'calculation_error'
+            if r.skip_reason:
+                if '难' in r.skip_reason:
+                    category = 'knowledge_gap'
+                elif '简单' in r.skip_reason:
+                    category = 'careless'
+            elif r.hint_count and r.hint_count > 2:
+                category = 'concept_weakness'
+
+            questions.append({
+                'question_id': str(r.question_id),
+                'error_category': category,
+                'created_at': r.created_at.isoformat() if r.created_at else '',
+                'hint_count': r.hint_count or 0,
+            })
+
+        return questions
+
+    async def get_categories_async(self, db: AsyncSession, user_id: int) -> Dict[str, Any]:
+        """异步获取错因分类（使用真实 DB）"""
+        questions = await self._get_user_wrong_questions(db, user_id)
+
+        categories: Dict[str, Dict] = {}
+        for q in questions:
+            cat = q['error_category']
+            if cat not in categories:
+                categories[cat] = {'category': cat, 'count': 0, 'questions': []}
+            categories[cat]['count'] += 1
+            categories[cat]['questions'].append(q['question_id'])
+
+        return {
+            'user_id': user_id,
+            'total_errors': len(questions),
+            'categories': categories,
+        }
     
     def _cache_classification(
         self,
@@ -354,18 +387,33 @@ class ErrorClassificationService:
         wrong_questions: List[Dict],
         count: int
     ) -> List[Dict]:
-        """推荐同错因的相似题目"""
-        # TODO: 从题库推荐变式题
-        # 临时返回模拟数据
-        return [
-            {
-                'question_id': f'similar_{i}',
-                'title': f'{self.ERROR_CATEGORIES[error_category]["name"]}练习题{i+1}',
-                'difficulty': 'medium',
-                'error_category': error_category
-            }
-            for i in range(count)
-        ]
+        """推荐同错因的相似题目（通过 Chroma 向量检索）"""
+        try:
+            from services.chroma_service import ChromaService
+            chroma = ChromaService()
+            query_kps = [q.get('knowledge_point', '') for q in wrong_questions if q.get('knowledge_point')]
+            if not query_kps:
+                query_kps = ['等差数列']
+            candidates = chroma.search_by_knowledge_points(knowledge_points=query_kps[:3], top_k=count * 3)
+            results = []
+            seen = set()
+            for c in candidates:
+                if c.question_id in seen:
+                    continue
+                seen.add(c.question_id)
+                results.append({
+                    'question_id': c.question_id,
+                    'title': c.content[:80] if c.content else '变式练习题',
+                    'difficulty': str(c.difficulty) if c.difficulty else 'medium',
+                    'error_category': error_category
+                })
+                if len(results) >= count:
+                    break
+            if results:
+                return results
+        except Exception:
+            pass
+        return [{'question_id': f'similar_{i}', 'title': f'{self.ERROR_CATEGORIES.get(error_category, {}).get("name", error_category)}练习题{i+1}', 'difficulty': 'medium', 'error_category': error_category} for i in range(count)]
     
     def _generate_study_suggestion(self, error_category: str) -> str:
         """生成学习建议"""

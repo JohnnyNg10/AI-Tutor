@@ -174,6 +174,94 @@ def _profile_to_dict(profile: UserProfile) -> Dict:
 # 探索 / 利用配比：70% 新题 / 30% 复习题
 EXPLORE_RATIO = 0.7
 
+
+async def _fast_recommend(
+    db: AsyncSession, user_id: int,
+    weak_kps: List[str], theta: float, limit: int
+) -> List[tuple]:
+    """
+    混合推荐：ChromaDB 语义召回 → MySQL 取完整数据 → 打分排序
+
+    流程：
+    1. 用薄弱知识点在 ChromaDB 做语义检索，返回相关题目 ID
+    2. 从 MySQL 获取这些 ID 对应的完整数据（含 standard_answer 等）
+    3. 按难度匹配 + 知识点相关度打分排序
+    """
+    import asyncio
+    from models.question import Question
+    from models.record import LearningRecord
+
+    # 用户已做题
+    seen_stmt = select(LearningRecord.question_id).where(
+        LearningRecord.user_id == user_id
+    ).order_by(LearningRecord.created_at.desc()).limit(200)
+    seen_result = await db.execute(seen_stmt)
+    seen_ids = {row[0] for row in seen_result.fetchall() if row[0]}
+
+    # Step 1: ChromaDB 语义召回（异步，不阻塞）
+    chroma_ids = []
+    try:
+        from rag.retriever import get_retriever
+        retriever = get_retriever()
+        query = " ".join(weak_kps) if weak_kps else "数列 等差数列 等比数列"
+        chroma_results = await asyncio.to_thread(
+            retriever.search_examples, query, top_k=max(limit * 3, 30)
+        )
+        for r in chroma_results:
+            meta = r.get("metadata", {})
+            qid = meta.get("question_id") or meta.get("id")
+            if qid:
+                try:
+                    chroma_ids.append(int(qid))
+                except (ValueError, TypeError):
+                    pass
+        logger.info(f"[Advisor] ChromaDB 语义召回 {len(chroma_ids)} 题")
+    except Exception as e:
+        logger.warning(f"[Advisor] ChromaDB 召回失败，降级为纯 MySQL: {e}")
+
+    # Step 2: MySQL 获取完整数据
+    if chroma_ids:
+        # 按 ChromaDB 召回的 ID 查询
+        stmt = select(Question).where(
+            Question.is_active == True,
+            Question.id.in_(chroma_ids[:limit * 3])
+        )
+        result = await db.execute(stmt)
+        questions = list(result.scalars().all())
+        # 保持 ChromaDB 的顺序（语义相关度高的在前）
+        id_order = {qid: idx for idx, qid in enumerate(chroma_ids)}
+        questions.sort(key=lambda q: id_order.get(q.id, 9999))
+    else:
+        # 降级：直接查 MySQL
+        stmt = select(Question).where(Question.is_active == True).limit(limit * 2)
+        result = await db.execute(stmt)
+        questions = list(result.scalars().all())
+
+    # Step 3: 打分排序
+    scored = []
+    for q in questions:
+        if q.id in seen_ids:
+            continue
+        kps = q.knowledge_points or []
+        relevance = _kp_relevance(kps, weak_kps)
+        diff_match = _difficulty_match(theta, q.difficulty or 3)
+        score = relevance * 0.5 + diff_match * 0.5
+        scored.append((q, score))
+
+    scored.sort(key=lambda x: -x[1])
+
+    candidates = []
+    for q, score in scored[:limit]:
+        candidates.append(({
+            "id": q.id, "content": q.content,
+            "question_type": q.question_type or "解答题",
+            "difficulty": q.difficulty or 3,
+            "knowledge_points": q.knowledge_points or [],
+            "source": q.source or "mysql"
+        }, score))
+
+    return candidates
+
 async def get_advisor_recommendations(
     db: AsyncSession,
     user_id: int,
@@ -207,80 +295,33 @@ async def get_advisor_recommendations(
         # 降级：用 profile weak_points
         weak_kps = sorted(weak_points.keys(), key=lambda k: weak_points[k], reverse=True)[:5]
 
-    # --- Step 4: MySQL 候选池 ---
-    # 从 Seen Set 拿到已做列表用于过滤
-    seen_ids = await rc.seen_get_all(user_id)
-    # 加上 due_review_ids（这些可以重新推送复习）
-    seen_ids_for_new = seen_ids - {int(i) for i in due_review_ids}
-
-    # 只取 knowledge_points 非空（非NULL且非[]）的题目
-    from sqlalchemy import func as sql_func, cast, String
-    all_q_stmt = (
-        select(Question)
-        .where(
-            Question.knowledge_points.isnot(None),
-            sql_func.json_length(Question.knowledge_points) > 0,
-        )
-    )
-    all_q_result = await db.execute(all_q_stmt)
-    all_questions = all_q_result.scalars().all()
-
-    # --- Step 5: 新题候选打分 ---
-    # 复习题槽位：至多占 (1-EXPLORE_RATIO) 比例，剩余全给新题
+    # --- Step 4: 快速推荐（MySQL + 难度匹配 + 知识点相关度）---
     review_slot = min(len(due_review_ids), max(0, int(limit * (1 - EXPLORE_RATIO))))
-    new_target = limit - review_slot  # 新题需要补齐的数量
+    new_target = limit - review_slot
 
-    # 选择题目标数：按 2:3 比例，即 ceil(new_target * 2/5)
-    import math as _math
-    CHOICE_TYPES = {"single_choice", "multiple_choice", "choice"}
-    choice_target = _math.ceil(new_target * 2 / 5)
-    essay_target = new_target - choice_target
-
-    def _score_question(q: "Question") -> float:
-        q_topics = _normalize_topics(q.knowledge_points)
-        kp_rel = _kp_relevance(q_topics, weak_kps)
-        diff_match = _difficulty_match(theta, int(q.difficulty or 1))
-        return 0.6 * kp_rel + 0.3 * diff_match
-
-    # 把候选题按题型分入两个池，再各自按知识点/难度匹配排序
-    choice_pool: List[Tuple["Question", float]] = []
-    essay_pool:  List[Tuple["Question", float]] = []
-
-    for q in all_questions:
-        if q.id in seen_ids_for_new:
-            continue
-        score = _score_question(q)
-        qtype = (q.question_type or "").lower()
-        if qtype in CHOICE_TYPES:
-            choice_pool.append((q, score))
-        else:
-            essay_pool.append((q, score))
-
-    choice_pool.sort(key=lambda x: x[1], reverse=True)
-    essay_pool.sort(key=lambda x: x[1], reverse=True)
-
-    # 先从各自池取目标数量，不足时互补
-    chosen_choices = choice_pool[:choice_target]
-    chosen_essays  = essay_pool[:essay_target]
-
-    shortage_choice = choice_target - len(chosen_choices)
-    shortage_essay  = essay_target  - len(chosen_essays)
-
-    # 选择题不够，用大题补；大题不够，用选择题补
-    if shortage_choice > 0:
-        chosen_essays += essay_pool[essay_target:essay_target + shortage_choice]
-    if shortage_essay > 0:
-        chosen_choices += choice_pool[choice_target:choice_target + shortage_essay]
-
-    # 合并新题候选，选择题在前（答题模式体验更好）
-    new_candidates = chosen_choices + chosen_essays
+    new_candidates = await _fast_recommend(db, user_id, weak_kps, theta, new_target * 3)
+    new_candidates = new_candidates[:max(new_target, limit, 1)]
+    logger.info(f"[Advisor] 快速推荐获取 {len(new_candidates)} 题")
 
     # --- Step 6: 复习题填充 ---
-    review_questions: List[Question] = []
+    # 将复习题也转换为统一格式（字典）
+    review_questions = []
     if due_review_ids:
         review_stmt = select(Question).where(Question.id.in_([int(i) for i in due_review_ids]))
         review_result = await db.execute(review_stmt)
-        review_questions = review_result.scalars().all()
+        db_review_questions = review_result.scalars().all()
+        
+        # 转换为字典格式
+        for q in db_review_questions:
+            review_questions.append({
+                "id": q.id,
+                "content": q.content,
+                "question_type": q.question_type or "解答题",
+                "difficulty": q.difficulty or 3,
+                "knowledge_points": q.knowledge_points or [],
+                "standard_answer": q.standard_answer,
+                "source": "review"
+            })
 
     # --- Step 7: 合并（复习优先），确保总数等于 limit ---
     final_review = review_questions[:review_slot]
@@ -307,13 +348,21 @@ async def get_advisor_recommendations(
     result_list = []
 
     for q in final_review:
-        q_topics = _normalize_topics(q.knowledge_points)
+        # 支持 Question 对象或字典
+        if isinstance(q, dict):
+            q_topics = _normalize_topics(q.get("knowledge_points", []))
+        else:
+            q_topics = _normalize_topics(q.knowledge_points)
         result_list.append(_build_recommendation_item(
             q, theta, q_topics, weak_kps, is_review=True, advisor_mode=advisor_mode
         ))
 
     for q, score in final_new:
-        q_topics = _normalize_topics(q.knowledge_points)
+        # 支持 Question 对象或字典
+        if isinstance(q, dict):
+            q_topics = _normalize_topics(q.get("knowledge_points", []))
+        else:
+            q_topics = _normalize_topics(q.knowledge_points)
         result_list.append(_build_recommendation_item(
             q, theta, q_topics, weak_kps, is_review=False, advisor_mode=advisor_mode, base_score=score
         ))
@@ -473,7 +522,7 @@ def _build_learning_goal(
 
 
 def _build_recommendation_item(
-    q: Question,
+    q,
     theta: float,
     q_topics: List[str],
     weak_kps: List[str],
@@ -481,12 +530,26 @@ def _build_recommendation_item(
     advisor_mode: str,
     base_score: float = 0.0,
 ) -> Dict:
-    diff_match = _difficulty_match(theta, int(q.difficulty or 1))
+    # 支持 Question 对象或字典
+    if isinstance(q, dict):
+        q_difficulty = q.get("difficulty", 3)
+        q_content = q.get("content", "")
+        q_id = q.get("id", 0)
+        q_type = q.get("question_type", "解答题")
+        q_standard_answer = q.get("standard_answer")
+    else:
+        q_difficulty = q.difficulty or 3
+        q_content = q.content
+        q_id = q.id
+        q_type = q.question_type or "解答题"
+        q_standard_answer = q.standard_answer
+    
+    diff_match = _difficulty_match(theta, int(q_difficulty or 3))
     kp_rel = _kp_relevance(q_topics, weak_kps)
     final_score = base_score if base_score > 0 else (0.6 * kp_rel + 0.3 * diff_match)
 
     # 推荐语气
-    diff = int(q.difficulty or 1)
+    diff = int(q_difficulty or 3)
     if diff - theta >= 1:
         tone = "鼓励型"
         reason_suffix = "是一道有挑战性的题目，相信你能做到！"
@@ -507,12 +570,12 @@ def _build_recommendation_item(
         reason = "这道题之前做错了，现在是复习它的好时机！" + reason
 
     return {
-        "id": q.id,
-        "content": q.content,
-        "difficulty": q.difficulty,
+        "id": q_id,
+        "content": q_content,
+        "difficulty": q_difficulty,
         "knowledge_points": q_topics,
-        "question_type": q.question_type,
-        "standard_answer": q.standard_answer,   # 选择题前端判题用
+        "question_type": q_type,
+        "standard_answer": q_standard_answer,   # 选择题前端判题用
         "is_review": is_review,
         "advisor_mode": advisor_mode,
         "hints_available": True,

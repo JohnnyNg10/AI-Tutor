@@ -49,6 +49,10 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        # Check if DATABASE_URL is set in environment, otherwise use MySQL
+        env_url = os.getenv("DATABASE_URL", "")
+        if env_url:
+            return env_url
         return f"mysql+aiomysql://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
 
     redis_host: str = os.getenv("REDIS_HOST", "localhost")

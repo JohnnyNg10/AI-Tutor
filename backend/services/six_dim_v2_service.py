@@ -35,6 +35,8 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from services.redis_service import RedisService
 from services.six_dimensional_ability_service import SixDimensionalAbilityService
 from utils.logger import logger
@@ -218,10 +220,31 @@ class SixDimV2Service:
         
         return adjustments
     
-    def _get_recent_interactions(self, user_id: int, minutes: int = 30) -> List[Dict]:
-        """获取最近交互"""
-        # TODO: 从数据库查询最近交互
-        return []
+    async def _get_recent_interactions(self, db: AsyncSession, user_id: int, minutes: int = 30) -> List[Dict]:
+        """从 user_interaction_logs 查询最近交互"""
+        from sqlalchemy import select, desc
+        from models.learning_analytics import UserInteractionLog
+        cutoff = datetime.now() - timedelta(minutes=minutes)
+        try:
+            stmt = (
+                select(UserInteractionLog)
+                .where(UserInteractionLog.user_id == user_id)
+                .where(UserInteractionLog.created_at >= cutoff)
+                .order_by(desc(UserInteractionLog.created_at))
+                .limit(50)
+            )
+            result = await db.execute(stmt)
+            records = result.scalars().all()
+            return [
+                {
+                    'interaction_type': r.interaction_type,
+                    'knowledge_points': r.knowledge_points,
+                    'created_at': r.created_at.isoformat() if r.created_at else '',
+                }
+                for r in records
+            ]
+        except Exception:
+            return []
     
     def _cache_realtime_metrics(self, user_id: int, metrics: RealTimeAbilityMetrics) -> None:
         """缓存实时指标"""
@@ -485,10 +508,29 @@ class SixDimV2Service:
             'reliability': 'high' if metrics.confidence > 0.8 else 'medium' if metrics.confidence > 0.5 else 'low'
         }
     
-    def get_dimension_trend(self, user_id: int, dimension: str, hours: int = 24) -> List[Dict]:
-        """获取维度趋势"""
-        # TODO: 从数据库查询历史趋势
-        return []
+    async def get_dimension_trend(self, db: AsyncSession, user_id: int, dimension: str, hours: int = 24) -> List[Dict]:
+        """从 user_ability_history 查询维度趋势"""
+        from sqlalchemy import select
+        from models.learning_analytics import UserAbilityHistory
+        cutoff = datetime.now() - timedelta(hours=hours)
+        try:
+            stmt = (
+                select(UserAbilityHistory)
+                .where(UserAbilityHistory.user_id == user_id)
+                .where(UserAbilityHistory.recorded_at >= cutoff)
+                .order_by(UserAbilityHistory.recorded_at)
+            )
+            result = await db.execute(stmt)
+            records = result.scalars().all()
+            return [
+                {
+                    'date': r.recorded_at.isoformat() if r.recorded_at else '',
+                    'theta': r.theta,
+                }
+                for r in records
+            ]
+        except Exception:
+            return []
 
 
 # ==================== 便捷函数 ====================

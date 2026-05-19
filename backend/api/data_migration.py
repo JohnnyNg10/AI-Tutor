@@ -16,9 +16,11 @@ BACKEND_DIR = os.path.dirname(CURRENT_DIR)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, HTTPException, Depends
+from database.db import get_db
 
 from services.data_migration_service import (
     DataMigrationService,
@@ -66,16 +68,13 @@ class ValidationResponse(BaseModel):
 @router.post("/migrate", response_model=MigrateUserResponse)
 async def migrate_user(
     request: MigrateUserRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """
-    迁移单个用户数据
-    
-    对应行号38: V2→V3数据迁移
-    """
+    """迁移单个用户数据 V2→V3"""
     try:
         service = DataMigrationService()
-        result = service.migrate_user_v2_to_v3(request.user_id)
+        result = await service.migrate_user_v2_to_v3(db, request.user_id)
         
         return MigrateUserResponse(
             success=result['success'],
@@ -93,15 +92,13 @@ async def migrate_user(
 @router.post("/migrate-batch")
 async def migrate_batch(
     request: BatchMigrateRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """批量迁移用户数据"""
     try:
         service = DataMigrationService()
-        result = service.batch_migrate_users(
-            request.user_ids,
-            request.batch_size
-        )
+        result = await service.batch_migrate_users(db, request.user_ids, request.batch_size)
         
         return {
             'success': result['success'],
@@ -138,12 +135,13 @@ async def get_migration_status(
 @router.post("/validate/{user_id}", response_model=ValidationResponse)
 async def validate_user_data(
     user_id: int,
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """验证用户数据完整性"""
     try:
         service = DataMigrationService()
-        validation = service.validate_user_data(user_id)
+        validation = await service.validate_user_data(db, user_id)
         
         return ValidationResponse(
             success=True,
@@ -160,12 +158,13 @@ async def validate_user_data(
 @router.post("/repair/{user_id}")
 async def repair_user_data(
     user_id: int,
+    db: AsyncSession = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """修复用户数据"""
     try:
         service = DataMigrationService()
-        result = service.repair_user_data(user_id)
+        result = await service.repair_user_data(db, user_id)
         
         return result
         

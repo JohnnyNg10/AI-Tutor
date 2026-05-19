@@ -122,12 +122,83 @@ class StreakHandler:
         )
     }
     
+    REDIS_KEY_PREFIX = "ai:tutor:streak:{user_id}"
+
     def __init__(self):
         self.streak_states: Dict[int, StreakState] = {}  # user_id -> StreakState
+
+    async def save_to_redis(self, user_id: int) -> bool:
+        """将连击状态持久化到 Redis"""
+        try:
+            from utils.redis_client import get_redis
+            redis = await get_redis()
+            if redis is None:
+                return False
+
+            state = self.get_user_streak_state(user_id)
+            key = self.REDIS_KEY_PREFIX.format(user_id=user_id)
+            await redis.hset(key, mapping={
+                'consecutive_correct': state.consecutive_correct,
+                'consecutive_wrong': state.consecutive_wrong,
+                'current_streak_type': state.current_streak_type.value,
+                'current_streak_count': state.current_streak_count,
+            })
+            # TTL: 7 天
+            await redis.expire(key, 7 * 24 * 3600)
+            return True
+        except Exception:
+            return False
+
+    async def load_from_redis(self, user_id: int) -> Optional[StreakState]:
+        """从 Redis 恢复连击状态"""
+        try:
+            from utils.redis_client import get_redis
+            redis = await get_redis()
+            if redis is None:
+                return None
+
+            key = self.REDIS_KEY_PREFIX.format(user_id=user_id)
+            data = await redis.hgetall(key)
+            if not data:
+                return None
+
+            state = StreakState(
+                consecutive_correct=int(data.get(b'consecutive_correct', 0)),
+                consecutive_wrong=int(data.get(b'consecutive_wrong', 0)),
+                current_streak_type=StreakType(data.get(b'current_streak_type', b'none').decode()),
+                current_streak_count=int(data.get(b'current_streak_count', 0)),
+            )
+            self.streak_states[user_id] = state
+            return state
+        except Exception:
+            return None
+
+    async def delete_from_redis(self, user_id: int) -> bool:
+        """从 Redis 删除连击状态"""
+        try:
+            from utils.redis_client import get_redis
+            redis = await get_redis()
+            if redis is None:
+                return False
+
+            key = self.REDIS_KEY_PREFIX.format(user_id=user_id)
+            await redis.delete(key)
+            return True
+        except Exception:
+            return False
     
     def get_user_streak_state(self, user_id: int) -> StreakState:
-        """获取用户的连击状态"""
+        """获取用户的连击状态（内存）"""
         if user_id not in self.streak_states:
+            self.streak_states[user_id] = StreakState()
+        return self.streak_states[user_id]
+
+    async def get_or_load_streak_state(self, user_id: int) -> StreakState:
+        """获取连击状态，优先从 Redis 恢复"""
+        if user_id not in self.streak_states:
+            loaded = await self.load_from_redis(user_id)
+            if loaded is not None:
+                return loaded
             self.streak_states[user_id] = StreakState()
         return self.streak_states[user_id]
     

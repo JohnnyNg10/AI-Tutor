@@ -14,6 +14,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc, func
+
 # 添加backend到路径
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.dirname(CURRENT_DIR)
@@ -245,25 +248,56 @@ class IRTRankingService:
             }
     
     # ==================== 数据查询方法 ====================
-    
-    def get_ranking_data(self, user_id: int) -> RankingData:
+
+    async def get_current_theta(self, db: AsyncSession, user_id: int) -> float:
+        """从 user_ability_history 获取用户最新 θ 值"""
+        from models.learning_analytics import UserAbilityHistory
+
+        stmt = (
+            select(UserAbilityHistory.theta)
+            .where(UserAbilityHistory.user_id == user_id)
+            .order_by(desc(UserAbilityHistory.recorded_at))
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        theta = result.scalar_one_or_none()
+
+        if theta is not None:
+            return theta
+
+        # 回退：从 user_profiles 查询
+        from models.profile import UserProfile
+        stmt2 = select(UserProfile).where(UserProfile.user_id == user_id)
+        result2 = await db.execute(stmt2)
+        profile = result2.scalar_one_or_none()
+        if profile and hasattr(profile, 'knowledge_mastery') and profile.knowledge_mastery:
+            import json
+            mastery = json.loads(profile.knowledge_mastery) if isinstance(profile.knowledge_mastery, str) else profile.knowledge_mastery
+            if isinstance(mastery, dict) and mastery:
+                avg = sum(float(v) for v in mastery.values()) / len(mastery)
+                return (avg - 0.5) * 6  # 映射到 [-3, 3]
+
+        return 0.0  # 默认值
+
+    async def get_ranking_data(self, db: AsyncSession, user_id: int) -> RankingData:
         """
-        获取段位数据
-        
+        获取段位数据（真实数据库查询）
+
         这是前端展示的主入口
         """
-        # TODO: 从数据库查询用户当前θ值
-        # 临时返回模拟数据
-        current_theta = 0.5  # 模拟数据
-        
+        current_theta = await self.get_current_theta(db, user_id)
+
         current_rank = self.theta_to_rank(current_theta)
         progress = self.calculate_progress_to_next(current_theta, current_rank)
         next_rank = self.get_next_rank(current_rank)
         prev_rank = self.get_prev_rank(current_rank)
-        
-        # TODO: 从数据库查询段位历史
-        rank_history = self._get_mock_rank_history()
-        
+
+        # 查询段位历史
+        rank_history = await self.get_rank_trend(db, user_id, days=30)
+
+        # 计算学习天数
+        total_study_days = len(rank_history)
+
         return RankingData(
             user_id=user_id,
             current_theta=round(current_theta, 2),
@@ -271,49 +305,34 @@ class IRTRankingService:
             progress_to_next=round(progress, 2),
             next_rank=next_rank,
             prev_rank=prev_rank,
-            total_study_days=30,  # 模拟数据
+            total_study_days=total_study_days,
             rank_history=rank_history
         )
-    
-    def _get_mock_rank_history(self) -> List[Dict[str, Any]]:
-        """获取模拟段位历史"""
-        history = []
-        base_theta = -1.5
-        
-        for i in range(10):
-            date = datetime.now() - timedelta(days=(10-i)*3)
-            theta = base_theta + (i / 10) * 2.0
-            rank = self.theta_to_rank(theta)
-            
-            history.append({
-                'date': date.strftime('%Y-%m-%d'),
-                'theta': round(theta, 2),
-                'rank_tier': rank.tier.value,
-                'rank_name': rank.name_cn,
-                'rank_color': rank.color,
-                'rank_icon': rank.icon
-            })
-        
-        return history
-    
-    def get_rank_trend(self, user_id: int, days: int = 30) -> List[Dict[str, Any]]:
+
+    async def get_rank_trend(self, db: AsyncSession, user_id: int, days: int = 30) -> List[Dict[str, Any]]:
         """
-        获取段位趋势数据
-        
+        获取段位趋势数据（查询 user_ability_history）
+
         用于绘制段位趋势图
         """
-        # TODO: 从user_ability_history表查询
+        from models.learning_analytics import UserAbilityHistory
+
+        cutoff = datetime.now() - timedelta(days=days)
+        stmt = (
+            select(UserAbilityHistory)
+            .where(UserAbilityHistory.user_id == user_id)
+            .where(UserAbilityHistory.recorded_at >= cutoff)
+            .order_by(UserAbilityHistory.recorded_at)
+        )
+        result = await db.execute(stmt)
+        records = result.scalars().all()
+
         history = []
-        base_theta = 0.0
-        
-        for i in range(days):
-            date = datetime.now() - timedelta(days=days-i-1)
-            # 模拟数据：逐渐提升
-            theta = base_theta + (i / days) * 0.8
+        for record in records:
+            theta = record.theta
             rank = self.theta_to_rank(theta)
-            
             history.append({
-                'date': date.strftime('%Y-%m-%d'),
+                'date': record.recorded_at.strftime('%Y-%m-%d'),
                 'theta': round(theta, 2),
                 'rank_tier': rank.tier.value,
                 'rank_name': rank.name_cn,
@@ -321,8 +340,25 @@ class IRTRankingService:
                 'rank_icon': rank.icon,
                 'progress': self.calculate_progress_to_next(theta, rank)
             })
-        
-        return history
+
+        return history if history else []
+
+    def get_ranking_data_sync(self, user_id: int) -> RankingData:
+        """同步版本：使用默认 theta（无 DB 连接时的回退）"""
+        current_theta = 0.0
+        current_rank = self.theta_to_rank(current_theta)
+        progress = self.calculate_progress_to_next(current_theta, current_rank)
+
+        return RankingData(
+            user_id=user_id,
+            current_theta=round(current_theta, 2),
+            current_rank=current_rank,
+            progress_to_next=round(progress, 2),
+            next_rank=self.get_next_rank(current_rank),
+            prev_rank=self.get_prev_rank(current_rank),
+            total_study_days=0,
+            rank_history=[]
+        )
     
     # ==================== 所有段位信息 ====================
     
@@ -345,15 +381,12 @@ class IRTRankingService:
 
 # ==================== 便捷函数 ====================
 
-def get_user_ranking_info(user_id: int) -> Dict[str, Any]:
+async def get_user_ranking_info(db: AsyncSession, user_id: int) -> Dict[str, Any]:
     """
-    便捷函数：获取用户段位信息
-    
-    使用示例:
-        info = get_user_ranking_info(1)
+    便捷函数：获取用户段位信息（异步，需要 DB session）
     """
     service = IRTRankingService()
-    data = service.get_ranking_data(user_id)
+    data = await service.get_ranking_data(db, user_id)
     
     return {
         'user_id': data.user_id,
