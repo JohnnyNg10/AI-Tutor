@@ -57,14 +57,28 @@ class GradingService:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
 
-            text = ocr_result.get("question_text", "") if ocr_result else ""
-            results.append({
-                "index": i,
-                "filename": fname,
-                "ocr_text": text,
-                "has_question": ocr_result.get("has_question", bool(text.strip())) if ocr_result else False,
-                "success": ocr_result.get("success", False) if ocr_result else False,
-            })
+            if ocr_result:
+                q_text = ocr_result.get("question_text", "")
+                a_text = ocr_result.get("answer_text", "")
+                results.append({
+                    "index": i,
+                    "filename": fname,
+                    "ocr_text": q_text,
+                    "answer_text": a_text,
+                    "has_question": ocr_result.get("has_question", bool(q_text.strip())),
+                    "has_answer": ocr_result.get("has_answer", bool(a_text.strip())),
+                    "success": ocr_result.get("success", False),
+                })
+            else:
+                results.append({
+                    "index": i,
+                    "filename": fname,
+                    "ocr_text": "",
+                    "answer_text": "",
+                    "has_question": False,
+                    "has_answer": False,
+                    "success": False,
+                })
 
         session.status = "reviewing"
         session.question_count = len(results)

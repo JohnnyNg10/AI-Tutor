@@ -7,21 +7,35 @@ from utils.logger import logger
 from utils.siliconflow_vision import siliconflow_vision_client
 
 
-# 图片分析提示词
-VISION_ANALYSIS_PROMPT = """请仔细分析这张图片中的数学数列题目。
+# 通用图片分析提示词 - 同时支持印刷题目和手写答案
+VISION_ANALYSIS_PROMPT = """请仔细分析这张图片中的所有文字和数学内容。
 
-任务要求：
-1. 识别图片中的数学公式、文字和符号
-2. 提取完整的题目内容（包括已知条件、求解目标）
-3. 如果图片包含解题过程，分析其解题思路
+这张图片可能是：
+- 印刷的数学题目（从教辅/试卷上截图或拍照）
+- 手写的解题过程（学生在纸上写的答案和演算）
 
-输出格式要求：
-请以纯文本形式返回题目内容，不要添加JSON格式或其他格式标记。只需返回提取到的题目文本即可。
+你的任务：
+1. 识别图片中所有的文字、数学公式、符号和数字
+2. 区分"题目内容"和"解题/答案内容"
+3. 数学公式请用 LaTeX 格式表示（行内公式用 $...$，独立公式用 $$...$$）
 
-示例输出格式：
-已知数列{a_n}满足a_1=1，a_{n+1}=2a_n+1，求数列{a_n}的通项公式。
+请严格按以下 JSON 格式返回（不要添加任何其他文字）：
+```json
+{
+  "question_text": "提取到的题目内容（含LaTeX公式），如果没有题目则为空字符串",
+  "answer_text": "提取到的解题过程或手写答案（含LaTeX公式），如果没有解题过程则为空字符串",
+  "has_question": true或false,
+  "has_answer": true或false
+}
+```
 
-如果图片中没有数学题目，请回复："图片中未识别到数学题目"
+注意：
+- 如果图片是印刷题目，question_text 填写题目内容，answer_text 留空
+- 如果图片是手写答案，answer_text 填写识别到的手写内容，question_text 留空
+- 如果图片同时包含题目和解答，分别填入对应字段
+- 手写内容请尽力识别，即使字迹不太清晰也要尝试提取
+- LaTeX公式示例：$a_{n+1}=2a_n+1$、$$S_n=\\frac{n(a_1+a_n)}{2}$$
+- 如果图片中完全没有数学相关内容，has_question和has_answer都设为false
 """
 
 
@@ -78,17 +92,53 @@ class ImageParser:
                     "error": "视觉模型返回空结果"
                 }
 
-            # 检查是否成功识别到题目
-            has_question = "图片中未识别到数学题目" not in response and len(response.strip()) > 10
-            
-            logger.info(f"Successfully parsed image, has_question: {has_question}")
-            logger.info(f"Extracted text preview: {response[:100]}...")
-            
-            return {
-                "success": True,
-                "question_text": response.strip(),
-                "has_question": has_question
-            }
+            # 尝试解析JSON返回
+            import json
+            import re
+
+            try:
+                # 尝试提取JSON（可能包裹在```json```中）
+                json_match = re.search(r'```json\s*([\s\S]*?)\s*```', response)
+                if json_match:
+                    parsed = json.loads(json_match.group(1))
+                else:
+                    # 尝试直接解析
+                    parsed = json.loads(response)
+
+                question_text = parsed.get("question_text", "").strip()
+                answer_text = parsed.get("answer_text", "").strip()
+                has_question = parsed.get("has_question", bool(question_text))
+                has_answer = parsed.get("has_answer", bool(answer_text))
+
+                # 如果没有区分，整段当作题目文本
+                if not question_text and not answer_text:
+                    question_text = response.strip()
+                    has_question = len(question_text) > 10
+
+                logger.info(f"Parsed image: has_question={has_question}, has_answer={has_answer}")
+                logger.info(f"Question preview: {question_text[:100] if question_text else '(empty)'}...")
+                logger.info(f"Answer preview: {answer_text[:100] if answer_text else '(empty)'}...")
+
+                return {
+                    "success": True,
+                    "question_text": question_text,
+                    "answer_text": answer_text,
+                    "has_question": has_question,
+                    "has_answer": has_answer,
+                }
+
+            except (json.JSONDecodeError, AttributeError):
+                # JSON解析失败，回退到纯文本处理
+                has_question = "未识别到" not in response and len(response.strip()) > 10
+                logger.info(f"JSON parse failed, fallback plain text, has_question: {has_question}")
+
+                return {
+                    "success": True,
+                    "question_text": response.strip(),
+                    "answer_text": "",
+                    "has_question": has_question,
+                    "has_answer": False,
+                }
             
         except Exception as e:
             logger.error(f"Image parsing error: {e}", exc_info=True)

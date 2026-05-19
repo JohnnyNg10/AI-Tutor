@@ -160,3 +160,55 @@ async def cancel_grading(
     if not ok:
         raise HTTPException(status_code=404, detail="批改记录不存在")
     return {"success": True}
+
+
+@router.post("/correct-text")
+async def correct_text(
+    payload: dict,
+    user=Depends(get_current_user),
+):
+    """AI 根据用户描述修正OCR识别文本中的公式/错误"""
+    current_text = payload.get("current_text", "")
+    user_prompt = payload.get("user_prompt", "")
+
+    if not current_text or not user_prompt:
+        raise HTTPException(status_code=400, detail="缺少 current_text 或 user_prompt")
+
+    correction_prompt = f"""你是一个数学公式排版专家。用户上传了一张数学题目的图片，OCR识别出了以下文本：
+
+---
+{current_text}
+---
+
+用户指出了识别结果中的问题：
+"{user_prompt}"
+
+请根据用户的描述修正文本。要求：
+1. 修正用户指出的错误（如公式识别错误、文字识别错误等）
+2. 数学公式必须使用正确的 LaTeX 格式（行内公式用 $...$，独立公式用 $$...$$）
+3. 保持文本结构不变（题目、解题过程等分段保持一致）
+4. 只返回修正后的完整文本，不要添加任何解释或额外文字
+5. 如果是中文数学题目，保持中文表述"""
+
+    try:
+        from openai import AsyncOpenAI
+        from utils.config import settings
+
+        client = AsyncOpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_api_base,
+        )
+        response = await client.chat.completions.create(
+            model=settings.llm_model,
+            messages=[{"role": "user", "content": correction_prompt}],
+            temperature=0.3,
+            max_tokens=2000,
+        )
+
+        corrected = response.choices[0].message.content.strip()
+        logger.info(f"Text correction done, length: {len(corrected)}")
+        return {"corrected_text": corrected}
+
+    except Exception as e:
+        logger.error(f"Text correction failed: {e}")
+        raise HTTPException(status_code=500, detail=f"AI修正失败: {str(e)}")

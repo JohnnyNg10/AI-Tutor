@@ -148,26 +148,41 @@
                   <span class="figma-review-left-label">{{ currentPreviewImage ? '点击放大' : '暂无图片' }}</span>
                 </div>
 
-                <!-- Right: structured editable text -->
+                <!-- Right: rendered math content (Figma: read-only + AI correct) -->
                 <div class="figma-review-right">
-                  <span class="figma-editable-hint">（可编辑）</span>
                   <div class="figma-ocr-section">
-                    <span class="figma-ocr-label">【题目】</span>
-                    <textarea
-                      v-model="currentQText"
-                      class="figma-ocr-textarea"
-                      rows="3"
-                      placeholder="OCR识别的题目内容..."
-                    ></textarea>
+                    <div class="figma-ocr-label-row">
+                      <span class="figma-ocr-label">【题目】</span>
+                      <button
+                        class="ai-correct-btn"
+                        :disabled="correctingText"
+                        @click="openCorrectionDialog('question')"
+                      >
+                        <Wand2 :size="14" />
+                        AI 纠错
+                      </button>
+                    </div>
+                    <div
+                      class="figma-ocr-rendered"
+                      v-html="renderLatex(currentQText) || '<span class=\'placeholder\'>等待OCR识别结果...</span>'"
+                    ></div>
                   </div>
                   <div class="figma-ocr-section">
-                    <span class="figma-ocr-label">【解题过程】</span>
-                    <textarea
-                      v-model="currentAText"
-                      class="figma-ocr-textarea"
-                      rows="6"
-                      placeholder="OCR识别的解题过程..."
-                    ></textarea>
+                    <div class="figma-ocr-label-row">
+                      <span class="figma-ocr-label">【解题过程】</span>
+                      <button
+                        class="ai-correct-btn"
+                        :disabled="correctingText"
+                        @click="openCorrectionDialog('answer')"
+                      >
+                        <Wand2 :size="14" />
+                        AI 纠错
+                      </button>
+                    </div>
+                    <div
+                      class="figma-ocr-rendered"
+                      v-html="renderLatex(currentAText) || '<span class=\'placeholder\'>等待OCR识别结果...</span>'"
+                    ></div>
                   </div>
                 </div>
               </div>
@@ -194,6 +209,50 @@
 
             <div v-else-if="ocrReady && ocrResults.length === 0" class="figma-empty">
               暂无识别结果，请重新上传
+            </div>
+          </div>
+
+          <!-- AI Correction Dialog -->
+          <div v-if="correctionDialog.open" class="correction-overlay" @click.self="correctionDialog.open = false">
+            <div class="correction-dialog">
+              <div class="correction-dialog-header">
+                <h4>AI 智能纠错 — {{ correctionDialog.section === 'question' ? '题目' : '解题过程' }}</h4>
+                <button class="correction-close" @click="correctionDialog.open = false">&times;</button>
+              </div>
+              <div class="correction-current">
+                <div class="correction-current-label">当前识别内容：</div>
+                <div
+                  class="correction-current-content"
+                  v-html="renderLatex(correctionDialog.currentText) || '(空)'"
+                ></div>
+              </div>
+              <div class="correction-input-row">
+                <textarea
+                  v-model="correctionDialog.userInput"
+                  class="correction-input"
+                  rows="3"
+                  placeholder="用自然语言描述需要修正的地方，例如：&#10;'第二行的公式应该是 a_n = 2^n - 1 而不是 2n - 1'&#10;'把 ∑ 改成 sigma，分母应该是 n(n+1) 不是 n+1'"
+                ></textarea>
+                <button
+                  class="figma-btn-primary correction-submit"
+                  :disabled="!correctionDialog.userInput.trim() || correctingText"
+                  @click="handleCorrectText"
+                >
+                  <Loader2 v-if="correctingText" :size="14" class="spinning" />
+                  {{ correctingText ? '修正中...' : '发送修正' }}
+                </button>
+              </div>
+              <div v-if="correctionDialog.result" class="correction-result">
+                <div class="correction-result-label">修正结果：</div>
+                <div
+                  class="correction-result-content"
+                  v-html="renderLatex(correctionDialog.result)"
+                ></div>
+                <button class="figma-btn-primary" @click="applyCorrection">
+                  <CheckCircle2 :size="16" />
+                  应用修正
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -235,12 +294,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch, nextTick, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, ArrowLeft, ArrowRight, CheckCircle2, Camera, ClipboardCheck,
-  Lightbulb, ScrollText, Loader2
+  Lightbulb, ScrollText, Loader2, Wand2
 } from 'lucide-vue-next'
+import katex from 'katex'
 import AppLayout from '../components/AppLayout.vue'
 import GradingProgress from '../components/grading/GradingProgress.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -263,6 +323,7 @@ const {
 const historyList = ref([])
 const uploading = ref(false)
 const gradingInProgress = ref(false)
+const correctingText = ref(false)
 const deleteTarget = ref(null)
 const lightboxImage = ref('')
 const fileInputRef = ref(null)
@@ -274,6 +335,16 @@ const allImages = computed(() => [...questionImages.value, ...answerImages.value
 const currentQText = ref('')
 const currentAText = ref('')
 
+// AI Correction dialog state
+const correctionDialog = reactive({
+  open: false,
+  section: 'question', // 'question' | 'answer'
+  currentText: '',
+  userInput: '',
+  result: '',
+  originalText: ''
+})
+
 // OCR data is ready for review
 const ocrReady = computed(() => ocrResults.value.length > 0)
 
@@ -284,12 +355,76 @@ const currentPreviewImage = computed(() => {
   return allImgs[idx]?.preview || ''
 })
 
+// Render LaTeX + plain text to HTML using KaTeX
+function renderLatex(text) {
+  if (!text) return ''
+  try {
+    // Split into tokens: $$...$$ blocks, $...$ inline, and plain text
+    const parts = []
+    let remaining = text
+    let match
+
+    // First handle $$...$$ display math (block)
+    const displayRegex = /\$\$([\s\S]*?)\$\$/g
+    let lastIndex = 0
+    while ((match = displayRegex.exec(remaining)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push({ type: 'text', content: escapeHTML(remaining.slice(lastIndex, match.index)) })
+      }
+      try {
+        const html = katex.renderToString(match[1].trim(), { throwOnError: false, displayMode: true })
+        parts.push({ type: 'math', content: html })
+      } catch {
+        parts.push({ type: 'text', content: escapeHTML(match[0]) })
+      }
+      lastIndex = displayRegex.lastIndex
+    }
+    remaining = remaining.slice(lastIndex)
+
+    // Then handle $...$ inline math in remaining text
+    const inlineRegex = /\$([^$]+)\$/g
+    lastIndex = 0
+    let result = ''
+    while ((match = inlineRegex.exec(remaining)) !== null) {
+      if (match.index > lastIndex) {
+        result += escapeHTML(remaining.slice(lastIndex, match.index))
+      }
+      try {
+        result += katex.renderToString(match[1].trim(), { throwOnError: false, displayMode: false })
+      } catch {
+        result += escapeHTML(match[0])
+      }
+      lastIndex = inlineRegex.lastIndex
+    }
+    result += escapeHTML(remaining.slice(lastIndex))
+
+    // Combine display math parts with inline result
+    let final = ''
+    for (const p of parts) {
+      final += p.content
+    }
+    final += result
+    return final || escapeHTML(text)
+  } catch {
+    return escapeHTML(text)
+  }
+}
+
+function escapeHTML(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\n/g, '<br>')
+}
+
 // Watch current question index to load editable text
 watch(currentQuestionIndex, () => {
   const r = ocrResults.value[currentQuestionIndex.value]
   if (r) {
     currentQText.value = r.question_text || r.ocr_text || ''
-    currentAText.value = r.student_answer || ''
+    currentAText.value = r.student_answer || r.answer_text || ''
   }
 })
 
@@ -336,6 +471,49 @@ function nextQuestion() {
 
 function showLightbox(src) {
   if (src) lightboxImage.value = src
+}
+
+// === AI Correction Dialog ===
+function openCorrectionDialog(section) {
+  const text = section === 'question' ? currentQText.value : currentAText.value
+  correctionDialog.open = true
+  correctionDialog.section = section
+  correctionDialog.currentText = text
+  correctionDialog.originalText = text
+  correctionDialog.userInput = ''
+  correctionDialog.result = ''
+}
+
+async function handleCorrectText() {
+  if (!correctionDialog.userInput.trim()) return
+  correctingText.value = true
+  correctionDialog.result = ''
+  try {
+    const res = await gradingAPI.correctText(
+      correctionDialog.currentText,
+      correctionDialog.userInput.trim()
+    )
+    correctionDialog.result = res?.corrected_text || res?.data?.corrected_text || ''
+  } catch (e) {
+    correctionDialog.result = '修正请求失败：' + (e?.message || '未知错误')
+  } finally {
+    correctingText.value = false
+  }
+}
+
+function applyCorrection() {
+  if (!correctionDialog.result) return
+  if (correctionDialog.section === 'question') {
+    currentQText.value = correctionDialog.result
+    // Also update in ocrResults
+    const r = ocrResults.value[currentQuestionIndex.value]
+    if (r) r.question_text = correctionDialog.result
+  } else {
+    currentAText.value = correctionDialog.result
+    const r = ocrResults.value[currentQuestionIndex.value]
+    if (r) r.student_answer = correctionDialog.result
+  }
+  correctionDialog.open = false
 }
 
 async function handleUploadAndOCR() {
@@ -628,13 +806,29 @@ onMounted(() => {
 }
 .figma-editable-hint { font-size: 11px; color: #86868B; }
 .figma-ocr-section { display: flex; flex-direction: column; gap: 6px; }
+.figma-ocr-label-row { display: flex; align-items: center; justify-content: space-between; }
 .figma-ocr-label { font-size: 13px; font-weight: 600; color: #0E61AC; }
-.figma-ocr-textarea {
-  width: 100%; border: 1px solid #EEEEEE; border-radius: 8px; padding: 10px 12px;
-  font-size: 13px; font-family: var(--font-family); color: #454545; line-height: 1.7;
-  resize: vertical; outline: none; box-sizing: border-box; background: #fff;
+
+/* AI Correct Button */
+.ai-correct-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: 1px solid #0E61AC; border-radius: 6px;
+  color: #0E61AC; padding: 4px 10px; font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.15s; font-family: var(--font-family);
 }
-.figma-ocr-textarea:focus { border-color: #0E61AC; }
+.ai-correct-btn:hover:not(:disabled) { background: #0E61AC; color: #FAF2E0; }
+.ai-correct-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Rendered OCR content (read-only math display) */
+.figma-ocr-rendered {
+  min-height: 60px; background: #fff; border: 1px solid #EEEEEE;
+  border-radius: 8px; padding: 12px 14px; font-size: 14px;
+  line-height: 1.8; color: #1B1B1B;
+}
+.figma-ocr-rendered .placeholder { color: #86868B; font-style: italic; }
+.figma-ocr-rendered :deep(.katex-display) { margin: 8px 0; overflow-x: auto; }
+.figma-ocr-rendered :deep(.katex) { font-size: 1.05em; }
+.figma-ocr-rendered :deep(.latex-error) { color: #dc2626; background: #fef2f2; padding: 2px 4px; border-radius: 3px; }
 
 /* Pagination */
 .figma-pagination {
@@ -659,6 +853,49 @@ onMounted(() => {
   display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .lightbox-image { max-width: 90vw; max-height: 90vh; border-radius: 12px; cursor: default; }
+
+/* AI Correction Dialog */
+.correction-overlay {
+  position: fixed; inset: 0; z-index: 9998; background: rgba(0,0,0,.4);
+  display: flex; align-items: center; justify-content: center;
+}
+.correction-dialog {
+  background: #fff; border-radius: 16px; padding: 24px; width: 600px;
+  max-width: 90vw; max-height: 85vh; overflow-y: auto; display: flex;
+  flex-direction: column; gap: 16px; box-shadow: 0 8px 32px rgba(0,0,0,.15);
+}
+.correction-dialog-header { display: flex; align-items: center; justify-content: space-between; }
+.correction-dialog-header h4 { font-size: 16px; font-weight: 600; color: #1B1B1B; }
+.correction-close {
+  background: none; border: none; font-size: 22px; color: #86868B;
+  cursor: pointer; line-height: 1; padding: 0;
+}
+.correction-current { display: flex; flex-direction: column; gap: 6px; }
+.correction-current-label { font-size: 12px; color: #86868B; }
+.correction-current-content {
+  background: #FAF2E0; border-radius: 8px; padding: 12px; font-size: 13px;
+  line-height: 1.8; color: #454545; max-height: 150px; overflow-y: auto;
+}
+.correction-current-content :deep(.katex-display) { margin: 6px 0; overflow-x: auto; }
+.correction-current-content :deep(.katex) { font-size: 1em; }
+
+.correction-input-row { display: flex; flex-direction: column; gap: 8px; }
+.correction-input {
+  width: 100%; border: 1px solid #EEEEEE; border-radius: 8px; padding: 10px 12px;
+  font-size: 13px; font-family: var(--font-family); color: #454545; line-height: 1.6;
+  resize: vertical; outline: none; box-sizing: border-box;
+}
+.correction-input:focus { border-color: #0E61AC; }
+.correction-submit { align-self: flex-end; }
+
+.correction-result { display: flex; flex-direction: column; gap: 8px; }
+.correction-result-label { font-size: 12px; font-weight: 500; color: #10b981; }
+.correction-result-content {
+  background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;
+  padding: 12px; font-size: 13px; line-height: 1.8; color: #1B1B1B;
+}
+.correction-result-content :deep(.katex-display) { margin: 6px 0; overflow-x: auto; }
+.correction-result-content :deep(.katex) { font-size: 1em; }
 
 .spinning { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

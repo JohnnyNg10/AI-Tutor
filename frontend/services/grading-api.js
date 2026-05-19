@@ -37,5 +37,12 @@ export const gradingAPI = {
 
   cancelGrading(sessionId) {
     return request(`/grading/cancel/${sessionId}`, { method: 'POST' })
+  },
+
+  correctText(currentText, userPrompt) {
+    return request('/grading/correct-text', {
+      method: 'POST',
+      body: JSON.stringify({ current_text: currentText, user_prompt: userPrompt })
+    })
   }
 }
